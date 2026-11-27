@@ -42,8 +42,9 @@ services:
     volumes:
       - ${HOST_TARGET_DIR:-./demo/inbox}:/data/target   # 정리할 폴더 (bind mount)
       - ./demo/samples:/app/samples:ro                   # 연습 폴더 초기화용 샘플 (읽기 전용)
+    # 127.0.0.1에만 열어 같은 와이파이의 다른 사람이 접속하지 못하게 한다 (0.0.0.0은 외부 공격 표면)
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       db:
         condition: service_healthy
@@ -91,7 +92,7 @@ services:
       PUBLIC_API_URL: http://localhost:8000    # 브라우저에서 여는 API 문서 주소
       SECRETARY_API_KEY: ${SECRETARY_API_KEY:-}
     ports:
-      - "8501:8501"
+      - "127.0.0.1:8501:8501"   # 내 PC에서만 접속
     depends_on:
       api:
         condition: service_healthy
