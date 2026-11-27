@@ -25,11 +25,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Response, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import demo, mover, planner
+from . import demo, mover, planner, shellscript
 from .config import settings
 from .db import Batch, FileRecord, Plan, PlanItem, WatcherStatus, get_app_settings, get_session, init_db
 from .schemas import (BatchOut, FileOut, PlanCreate, PlanItemOut, PlanItemUpdate, PlanOut, PlanSummary,
@@ -184,6 +184,26 @@ def apply_plan(plan_id: int, session: Session = Depends(get_session)):
 @router.get("/batches", response_model=list[BatchOut], tags=["batches"])
 def list_batches(limit: int = Query(20, ge=1, le=200), session: Session = Depends(get_session)):
     return session.scalars(select(Batch).order_by(Batch.id.desc()).limit(limit)).all()
+
+
+@router.get("/plans/{plan_id}/script", response_class=PlainTextResponse, tags=["plans"])
+def plan_script(plan_id: int, session: Session = Depends(get_session)):
+    """정리 계획을 리눅스 셸 스크립트(mkdir -p, mv -n)로 보여 준다. 내려받아 직접 실행할 수도 있다."""
+    plan = _get_plan(session, plan_id)
+    return PlainTextResponse(shellscript.plan_script(plan), headers=_attachment(f"plan-{plan_id}.sh"))
+
+
+@router.get("/batches/{batch_id}/script", response_class=PlainTextResponse, tags=["batches"])
+def batch_undo_script(batch_id: int, session: Session = Depends(get_session)):
+    """정리 기록을 되돌리는 셸 스크립트."""
+    batch = session.get(Batch, batch_id)
+    if batch is None:
+        raise HTTPException(status_code=404, detail=f"{batch_id}번 기록이 없습니다.")
+    return PlainTextResponse(shellscript.undo_script(batch), headers=_attachment(f"undo-{batch_id}.sh"))
+
+
+def _attachment(filename: str) -> dict:
+    return {"Content-Disposition": f'inline; filename="{filename}"'}
 
 
 @router.post("/batches/{batch_id}/undo", response_model=BatchOut, tags=["batches"])

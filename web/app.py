@@ -248,6 +248,10 @@ with tab_clean:
                     st.rerun()
             if st.button("📂 다시 살펴보기", use_container_width=True):
                 start_scan()
+            with st.expander("🐧 되돌리기 명령어"):
+                undo = api("GET", f"/api/v1/batches/{batch['id']}/script")
+                if isinstance(undo, (bytes, bytearray)):
+                    st.code(undo.decode("utf-8"), language="bash")
 
     elif not plan:  # ---- 시작 화면 ----
         loose = stats.get("loose_files", 0)
@@ -342,6 +346,17 @@ with tab_clean:
             api("DELETE", f"/api/v1/plans/{plan['id']}")
             st.session_state.pop("plan", None)
             st.rerun()
+
+        with st.expander("🐧 이 정리를 리눅스 명령어로 보기"):
+            st.caption("서비스가 하는 일은 결국 `mkdir -p`(폴더 만들기)와 `mv -n`(옮기며 이름 바꾸기, 덮어쓰지 않음)입니다. "
+                       "지우는 명령은 없습니다. 내려받아 정리 폴더에서 `bash plan.sh`로 직접 실행해도 같은 결과가 나옵니다. "
+                       "(표에서 고친 내용은 '정리하기'를 누를 때 반영되므로, 아래는 AI 제안 기준입니다.)")
+            script = api("GET", f"/api/v1/plans/{plan['id']}/script")
+            if isinstance(script, (bytes, bytearray)):
+                text = script.decode("utf-8")
+                st.code(text, language="bash")
+                st.download_button("⬇️ 셸 스크립트 내려받기", data=text.encode("utf-8"),
+                                   file_name=f"plan-{plan['id']}.sh", mime="text/x-shellscript")
 
 
 # ---------------------------------------------------------------------------
