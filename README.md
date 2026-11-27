@@ -18,6 +18,7 @@
 | **폴더 정리** | 수업(과목별)·문서·영수증·사진·스크린샷·개인서류·설치파일 등으로 분류. 내 과목 목록 반영 |
 | **미리보기 → 승인** | 정리 전/후 폴더 모습을 먼저 보여 주고, 표에서 이름·폴더를 고친 뒤 승인한 것만 옮김 |
 | **되돌리기** | 모든 이동을 기록해 한 번에 원래대로 |
+| **리눅스 명령어로 보기** | 정리 계획을 `mkdir -p`·`mv -n` 셸 스크립트로 보여 주고 내려받기, 되돌리기 스크립트도 제공 |
 | **폴더 감시 데몬** | 새 파일이 들어오면 백그라운드에서 미리 AI 분석 → '살펴보기'를 누를 때는 기다리지 않음 |
 | **말로 검색** | "교수님이 보낸 기말 프로젝트 공지 찾아줘" → 파일과 요약, 바로 열기 |
 | **개인정보 보호** | 신분증·증명서·통장 사본은 **내용을 AI에 보내지 않음**. 일반 문서도 전화번호·이메일·계좌번호를 가린 뒤 전송 |
@@ -138,7 +139,7 @@ Gemini 관련 테스트는 **진짜 google-genai SDK가 로컬 가짜 서버로 
 | 강의 | 이 프로젝트에서 | 파일 |
 |---|---|---|
 | 오픈소스 개념 | MIT 라이선스로 공개, 오픈소스 부품 활용(tesseract, hwplib 샘플 — Apache-2.0 표기), 기존 오픈소스 조사·비교 | `LICENSE`, `docs/comparison.md` |
-| 리눅스 1 | 파이프(`\|`)·리다이렉션(`>>`)으로 API 결과 가공(`curl \| jq`), `apt`로 tesseract·jq 설치 | `scripts/*.sh`, `api/Dockerfile` |
+| 리눅스 1 | 정리 계획을 `mkdir -p`·`mv -n` 스크립트로 내보내기(`rm` 없음, `>>` 기록), 파이프(`\|`)·리다이렉션(`>>`)으로 API 결과 가공(`curl \| jq`), `apt`로 tesseract·jq 설치 | `api/app/shellscript.py`, `scripts/*.sh`, `api/Dockerfile` |
 | 리눅스 2·3 | **폴더 감시 데몬**(항상 실행되며 새 파일을 미리 분석, `SIGTERM`으로 깔끔하게 종료), bash 스크립트(`#!/bin/bash`, `chmod +x`), `crontab`으로 매일 자동 리포트, `.env`는 `chmod 600`, 사용자 번호(UID)와 파일 권한 | `api/app/watcher.py`, `scripts/daily_report.sh`, `.env.example` |
 | 가상화 | 멀티스테이지 Dockerfile, `.dockerignore`, Compose(web·api·db + volume + bridge + **bind mount**), healthcheck, 비root 실행, Docker Hub push | `*/Dockerfile`, `docker-compose.yml` |
 | Git 1~3 | 기능별 브랜치·PR·merge로 개발, PR 템플릿, revert | `docs/git-workflow.md`, `.github/` |
