@@ -145,7 +145,7 @@ Gemini 관련 테스트는 **진짜 google-genai SDK가 로컬 가짜 서버로 
 | Git 1~3 | 기능별 브랜치·PR·merge로 개발, PR 템플릿, revert, **PR마다 GitHub Actions 자동 검사** | `docs/git-workflow.md`, `.github/` |
 | 생성 AI 1 (API) | REST 설계(POST·GET·PUT·PATCH·DELETE), API 키 헤더 인증, 자동 API 문서 | `api/app/main.py` |
 | 생성 AI 2 (Gemini) | `google-genai` SDK interactions API, **멀티모달 입력**(이미지·스캔 PDF), **JSON 스키마 구조화 출력**, 실패 시 대체 | `api/app/analyzer.py`, `api/app/search.py` |
-| AutoML (KNIME) | (선택) REST로 정리 기록을 받아 분석·분류 모델 비교 | `knime/README.md` |
+| AutoML (KNIME) | **A.** Scorer로 규칙 기반 vs Gemini 정확도 비교, **B.** Gemini가 붙인 분류를 정답 삼아 이름·확장자·크기만 보는 분류 모델(Decision Tree·Random Forest) 학습 → 확실한 파일은 Gemini 생략 가능 비율 측정 | `knime/README.md`, `api/app/knime_export.py` |
 
 ## 기존 서비스와 비교
 

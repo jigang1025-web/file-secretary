@@ -453,3 +453,15 @@ with tab_cfg:
                 st.rerun()
     st.info("정리 폴더를 바꾸려면 `.env`의 `HOST_TARGET_DIR`를 고친 뒤 `docker compose up -d`로 다시 시작하세요.\n\n"
             "Windows 예: `HOST_TARGET_DIR=C:/Users/내아이디/Downloads`")
+
+    st.markdown("#### 📊 KNIME 실습용 데이터")
+    st.caption("정리 폴더의 파일마다 이름 특징·규칙 분류·Gemini 분류(미리 저장된 것)·정답(연습 폴더)을 CSV로 내려받습니다. "
+               "Gemini를 새로 부르지 않습니다. 사용법은 `knime/README.md`를 보세요.")
+    if st.button("CSV 만들기"):
+        with st.spinner("파일을 읽는 중… (이미지 글자 인식 때문에 수십 초 걸릴 수 있어요)"):
+            data = api("GET", "/api/v1/export/knime.csv", timeout=300)
+        if isinstance(data, (bytes, bytearray)):
+            st.session_state["knime_csv"] = bytes(data)
+    if st.session_state.get("knime_csv"):
+        st.download_button("⬇️ knime_files.csv 내려받기", data=st.session_state["knime_csv"],
+                           file_name="knime_files.csv", mime="text/csv")
