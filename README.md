@@ -141,8 +141,8 @@ Gemini 관련 테스트는 **진짜 google-genai SDK가 로컬 가짜 서버로 
 | 오픈소스 개념 | MIT 라이선스로 공개, 오픈소스 부품 활용(tesseract, hwplib 샘플 — Apache-2.0 표기), 기존 오픈소스 조사·비교 | `LICENSE`, `docs/comparison.md` |
 | 리눅스 1 | 정리 계획을 `mkdir -p`·`mv -n` 스크립트로 내보내기(`rm` 없음, `>>` 기록), 파이프(`\|`)·리다이렉션(`>>`)으로 API 결과 가공(`curl \| jq`), `apt`로 tesseract·jq 설치 | `api/app/shellscript.py`, `scripts/*.sh`, `api/Dockerfile` |
 | 리눅스 2·3 | **폴더 감시 데몬**(항상 실행되며 새 파일을 미리 분석, `SIGTERM`으로 깔끔하게 종료), bash 스크립트(`#!/bin/bash`, `chmod +x`), `crontab`으로 매일 자동 리포트, `.env`는 `chmod 600`, 사용자 번호(UID)와 파일 권한 | `api/app/watcher.py`, `scripts/daily_report.sh`, `.env.example` |
-| 가상화 | 멀티스테이지 Dockerfile, `.dockerignore`, Compose(web·api·db + volume + bridge + **bind mount**), healthcheck, 비root 실행, Docker Hub push | `*/Dockerfile`, `docker-compose.yml` |
-| Git 1~3 | 기능별 브랜치·PR·merge로 개발, PR 템플릿, revert | `docs/git-workflow.md`, `.github/` |
+| 가상화 | CI에서 PostgreSQL 서비스 컨테이너로 통합 테스트·이미지 빌드·Trivy 취약점 검사, 멀티스테이지 Dockerfile, `.dockerignore`, Compose(web·api·db + volume + bridge + **bind mount**), healthcheck, 비root 실행, Docker Hub push | `*/Dockerfile`, `docker-compose.yml` |
+| Git 1~3 | 기능별 브랜치·PR·merge로 개발, PR 템플릿, revert, **PR마다 GitHub Actions 자동 검사** | `docs/git-workflow.md`, `.github/` |
 | 생성 AI 1 (API) | REST 설계(POST·GET·PUT·PATCH·DELETE), API 키 헤더 인증, 자동 API 문서 | `api/app/main.py` |
 | 생성 AI 2 (Gemini) | `google-genai` SDK interactions API, **멀티모달 입력**(이미지·스캔 PDF), **JSON 스키마 구조화 출력**, 실패 시 대체 | `api/app/analyzer.py`, `api/app/search.py` |
 | AutoML (KNIME) | (선택) REST로 정리 기록을 받아 분석·분류 모델 비교 | `knime/README.md` |
