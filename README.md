@@ -18,6 +18,7 @@
 | **폴더 정리** | 수업(과목별)·문서·영수증·사진·스크린샷·개인서류·설치파일 등으로 분류. 내 과목 목록 반영 |
 | **미리보기 → 승인** | 정리 전/후 폴더 모습을 먼저 보여 주고, 표에서 이름·폴더를 고친 뒤 승인한 것만 옮김 |
 | **되돌리기** | 모든 이동을 기록해 한 번에 원래대로 |
+| **폴더 감시 데몬** | 새 파일이 들어오면 백그라운드에서 미리 AI 분석 → '살펴보기'를 누를 때는 기다리지 않음 |
 | **말로 검색** | "교수님이 보낸 기말 프로젝트 공지 찾아줘" → 파일과 요약, 바로 열기 |
 | **개인정보 보호** | 신분증·증명서·통장 사본은 **내용을 AI에 보내지 않음**. 일반 문서도 전화번호·이메일·계좌번호를 가린 뒤 전송 |
 | **정리 도우미** | 중복 파일(내용 지문 비교), 오래된 설치 파일 표시 — 지우는 기능은 없음 |
@@ -62,7 +63,7 @@ flowchart LR
 git clone https://github.com/<아이디>/file-secretary.git && cd file-secretary
 cp .env.example .env && chmod 600 .env      # GEMINI_API_KEY, SECRETARY_API_KEY 채우기
 docker compose up -d --build
-docker compose ps                            # 3개 컨테이너가 healthy인지 확인
+docker compose ps                            # 4개 컨테이너(db·api·watcher·web)가 healthy인지 확인
 ```
 
 | 주소 | 내용 |
@@ -138,7 +139,7 @@ Gemini 관련 테스트는 **진짜 google-genai SDK가 로컬 가짜 서버로 
 |---|---|---|
 | 오픈소스 개념 | MIT 라이선스로 공개, 오픈소스 부품 활용(tesseract, hwplib 샘플 — Apache-2.0 표기), 기존 오픈소스 조사·비교 | `LICENSE`, `docs/comparison.md` |
 | 리눅스 1 | 파이프(`\|`)·리다이렉션(`>>`)으로 API 결과 가공(`curl \| jq`), `apt`로 tesseract·jq 설치 | `scripts/*.sh`, `api/Dockerfile` |
-| 리눅스 2·3 | bash 스크립트(`#!/bin/bash`, `chmod +x`), `crontab`으로 매일 자동 리포트, `.env`는 `chmod 600`, 사용자 번호(UID)와 파일 권한 | `scripts/daily_report.sh`, `.env.example` |
+| 리눅스 2·3 | **폴더 감시 데몬**(항상 실행되며 새 파일을 미리 분석, `SIGTERM`으로 깔끔하게 종료), bash 스크립트(`#!/bin/bash`, `chmod +x`), `crontab`으로 매일 자동 리포트, `.env`는 `chmod 600`, 사용자 번호(UID)와 파일 권한 | `api/app/watcher.py`, `scripts/daily_report.sh`, `.env.example` |
 | 가상화 | 멀티스테이지 Dockerfile, `.dockerignore`, Compose(web·api·db + volume + bridge + **bind mount**), healthcheck, 비root 실행, Docker Hub push | `*/Dockerfile`, `docker-compose.yml` |
 | Git 1~3 | 기능별 브랜치·PR·merge로 개발, PR 템플릿, revert | `docs/git-workflow.md`, `.github/` |
 | 생성 AI 1 (API) | REST 설계(POST·GET·PUT·PATCH·DELETE), API 키 헤더 인증, 자동 API 문서 | `api/app/main.py` |
@@ -179,7 +180,7 @@ file-secretary/
 
 - 폴더 **맨 위의 파일**만 정리합니다 (하위 폴더 재정리는 다음 단계).
 - 아주 오래된 HWP(3.0 이하)와 암호 걸린 문서는 내용을 읽지 못해 이름·형식으로만 분류합니다.
-- 실시간 감시 대신 '살펴보기' 버튼과 cron 리포트를 씁니다.
+- 폴더 감시는 변경 알림 대신 주기적으로 확인(polling)합니다. Windows 폴더를 Docker로 연결하면 알림이 오지 않을 수 있기 때문입니다.
 
 ## 개발 방식·출처
 

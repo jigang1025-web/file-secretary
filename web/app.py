@@ -151,6 +151,17 @@ def render_tree(tree: dict, title: str, max_files: int = 6) -> str:
 health = api("GET", "/health") or {}
 cfg = api("GET", "/api/v1/settings") or {}
 stats = api("GET", "/api/v1/stats") or {}
+watcher = api("GET", "/api/v1/watcher") or {}
+
+
+def watcher_line(w: dict) -> str:
+    """폴더 감시 데몬 상태 한 줄."""
+    if not w.get("running"):
+        return "🛰️ 폴더 감시: 꺼짐"
+    total, ready = w.get("loose", 0), w.get("ready", 0)
+    icon = "⏳" if w.get("state") == "analyzing" else ("✅" if total and ready >= total else "🛰️")
+    count = f" ({ready}/{total})" if total else ""
+    return f"{icon} 폴더 감시: {w.get('message', '')}{count}"
 
 st.markdown('<div class="fs-hero"><h1>🗂️ 파일 정리 비서</h1>'
             '<p>생성 AI가 파일 내용을 읽고 → 알아보기 쉬운 이름을 짓고 → 폴더별로 정리하고 → 말로 찾아 드립니다.</p></div>',
@@ -163,6 +174,7 @@ with st.sidebar:
     else:
         st.warning("AI 분석: **규칙 기반** (Gemini 키 없음)\n\n`.env`에 `GEMINI_API_KEY`를 넣으면 AI가 내용을 읽습니다.")
     st.caption(f"🔒 이미지 속 민감 정보 확인(OCR): {'켜짐' if cfg.get('ocr_enabled') else '꺼짐'}")
+    st.caption(watcher_line(watcher))
     st.subheader("정리 폴더")
     st.code(cfg.get("target_dir", "?"), language=None)
     c1, c2 = st.columns(2)
@@ -244,6 +256,13 @@ with tab_clean:
             st.markdown(f"#### 정리 폴더에 흩어진 파일 **{loose}개**")
             st.write("**폴더 살펴보기**를 누르면 AI가 파일 내용을 읽고 새 이름과 폴더를 제안합니다. "
                      "파일은 **확인을 누르기 전까지 옮기지 않습니다.**")
+            if watcher.get("running") and loose:
+                ready, total = watcher.get("ready", 0), watcher.get("loose", 0)
+                if total and ready >= total:
+                    st.success("✅ 폴더 감시 데몬이 새 파일을 모두 미리 읽어 두었습니다. 살펴보기가 바로 끝납니다.")
+                else:
+                    st.info(f"🛰️ 폴더 감시 데몬이 새 파일을 미리 읽는 중입니다 ({ready}/{total}). "
+                            "끝난 뒤에 누르면 기다리지 않습니다. 새로고침하면 진행 상황이 바뀝니다.")
             if st.button("📂 폴더 살펴보기", type="primary", disabled=loose == 0):
                 start_scan()
             if loose == 0:

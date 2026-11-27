@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Response, status
@@ -30,9 +31,9 @@ from sqlalchemy.orm import Session
 
 from . import demo, mover, planner
 from .config import settings
-from .db import Batch, FileRecord, Plan, PlanItem, get_app_settings, get_session, init_db
+from .db import Batch, FileRecord, Plan, PlanItem, WatcherStatus, get_app_settings, get_session, init_db
 from .schemas import (BatchOut, FileOut, PlanCreate, PlanItemOut, PlanItemUpdate, PlanOut, PlanSummary,
-                      SearchHit, SearchOut, SettingsIn, SettingsOut, StatsOut, TreeNode)
+                      SearchHit, SearchOut, SettingsIn, SettingsOut, StatsOut, TreeNode, WatcherOut)
 from .search import search as run_search
 from .security import require_api_key
 
@@ -269,6 +270,22 @@ def stats(session: Session = Depends(get_session)):
     last = session.scalar(select(Batch.id).order_by(Batch.id.desc()).limit(1))
     return StatsOut(target_dir=str(root), loose_files=loose, organized_files=organized or 0,
                     by_category={c: n for c, n in rows}, last_batch_id=last)
+
+
+@router.get("/watcher", response_model=WatcherOut, tags=["system"])
+def watcher_status(session: Session = Depends(get_session)):
+    """폴더 감시 데몬 상태: 새 파일을 몇 개나 미리 분석해 두었는지."""
+    row = session.get(WatcherStatus, 1)
+    if row is None:
+        return WatcherOut(running=False, state="off", loose=0, ready=0, failed=0,
+                          message="폴더 감시 데몬이 실행 중이 아닙니다", updated_at=None)
+    updated = row.updated_at if row.updated_at.tzinfo else row.updated_at.replace(tzinfo=timezone.utc)
+    # 분석 중에는 한 번에 몇 분 걸릴 수 있으므로 여유를 둔다
+    limit = settings.watch_interval_seconds * 3 + (settings.llm_total_budget_seconds + 60 if row.state == "analyzing" else 30)
+    running = (datetime.now(timezone.utc) - updated).total_seconds() < limit
+    return WatcherOut(running=running, state=row.state if running else "off", loose=row.loose, ready=row.ready,
+                      failed=row.failed, message=row.message if running else "폴더 감시 데몬이 응답하지 않습니다",
+                      updated_at=updated)
 
 
 # ---------------------------------------------------------------------------
