@@ -1,0 +1,73 @@
+# =============================================================================
+# 파일 정리 비서 전체 실행:  docker compose up -d --build
+#   db  : PostgreSQL (정리 기록·검색 색인, pgdata 볼륨에 영구 저장)
+#   api : FastAPI REST 서버  → http://localhost:8000/docs
+#   web : Streamlit 대시보드 → http://localhost:8501
+# 세 컨테이너는 secretary-net(bridge) 네트워크로 연결되어 서비스 이름(db, api)으로 서로를 찾는다.
+# 정리할 폴더는 .env의 HOST_TARGET_DIR (처음에는 연습 폴더 ./demo/inbox)를 api 컨테이너의 /data/target 에 연결한다.
+# =============================================================================
+services:
+  db:
+    image: postgres:17
+    container_name: secretary-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-secretary}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secretary}
+      POSTGRES_DB: ${POSTGRES_DB:-secretary}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - secretary-net
+
+  api:
+    build: ./api
+    image: ${DOCKERHUB_USER:-local}/file-secretary-api:${TAG:-0.1.0}
+    container_name: secretary-api
+    env_file:
+      - path: .env
+        required: false
+    # 연결한 폴더의 파일을 옮길 수 있도록 내 계정 번호로 실행 (리눅스·WSL: id -u / id -g)
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-secretary}:${POSTGRES_PASSWORD:-secretary}@db:5432/${POSTGRES_DB:-secretary}
+      TARGET_DIR: /data/target
+      SAMPLES_DIR: /app/samples
+      TZ: Asia/Seoul
+    volumes:
+      - ${HOST_TARGET_DIR:-./demo/inbox}:/data/target   # 정리할 폴더 (bind mount)
+      - ./demo/samples:/app/samples:ro                   # 연습 폴더 초기화용 샘플 (읽기 전용)
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - secretary-net
+
+  web:
+    build: ./web
+    image: ${DOCKERHUB_USER:-local}/file-secretary-web:${TAG:-0.1.0}
+    container_name: secretary-web
+    environment:
+      API_URL: http://api:8000                 # 컨테이너끼리는 서비스 이름으로 접근 (Docker DNS)
+      PUBLIC_API_URL: http://localhost:8000    # 브라우저에서 여는 API 문서 주소
+      SECRETARY_API_KEY: ${SECRETARY_API_KEY:-}
+    ports:
+      - "8501:8501"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - secretary-net
+
+volumes:
+  pgdata:
+
+networks:
+  secretary-net:
+    driver: bridge

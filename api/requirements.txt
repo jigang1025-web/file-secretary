@@ -1,0 +1,11 @@
+fastapi==0.162.5
+uvicorn[standard]==0.54.0
+sqlalchemy==2.1.8
+psycopg[binary]==3.3.8
+google-genai==3.6.1
+pypdf==6.17.0
+python-docx==1.2.0
+python-pptx==1.0.2
+openpyxl==3.1.5
+olefile==0.47
+pillow==12.3.0

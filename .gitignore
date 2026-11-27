@@ -1,0 +1,22 @@
+# 비밀정보 — 절대 커밋 금지
+.env
+
+# 파이썬
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# 로컬 DB
+*.db
+
+# 연습 폴더 (매번 '연습 폴더 초기화'로 다시 만든다)
+demo/inbox/*
+!demo/inbox/.gitkeep
+
+# 편집기·OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,5 @@
+# Windows에서 받아도 셸 스크립트 줄바꿈이 CRLF로 바뀌지 않도록 (바뀌면 '/bin/bash^M' 오류)
+*.sh text eol=lf
+# 샘플 파일은 내용 그대로 (줄바꿈 변환 금지)
+demo/samples/** binary
+api/tests/fixtures/*.hwp binary
