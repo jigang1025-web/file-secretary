@@ -313,7 +313,8 @@ def watcher_status(session: Session = Depends(get_session)):
                           message="폴더 감시 데몬이 실행 중이 아닙니다", updated_at=None)
     updated = row.updated_at if row.updated_at.tzinfo else row.updated_at.replace(tzinfo=timezone.utc)
     # 분석 중에는 한 번에 몇 분 걸릴 수 있으므로 여유를 둔다
-limit = settings.watch_interval_seconds * 3 + (max(settings.llm_total_budget_seconds, 300) + 60 if row.state == "analyzing" else 30)    running = (datetime.now(timezone.utc) - updated).total_seconds() < limit
+limit = settings.watch_interval_seconds * 3 + (max(settings.llm_total_budget_seconds, 300) + 60 if row.state == "analyzing" else 30)    
+running = (datetime.now(timezone.utc) - updated).total_seconds() < limit
     return WatcherOut(running=running, state=row.state if running else "off", loose=row.loose, ready=row.ready,
                       failed=row.failed, message=row.message if running else "폴더 감시 데몬이 응답하지 않습니다",
                       updated_at=updated)
