@@ -57,12 +57,13 @@ jobs:
       - name: 이미지 빌드 (docker compose)
         run: docker compose build
       - name: 이미지 취약점 검사 (Trivy, 결과만 보고)
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: local/file-secretary-api:0.1.0
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: "0"
+        continue-on-error: true
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.58.0 image \
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 \
+            local/file-secretary-api:0.1.0
 
   lint:
     runs-on: ubuntu-latest
