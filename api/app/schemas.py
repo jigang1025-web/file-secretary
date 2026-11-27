@@ -134,6 +134,16 @@ class TreeNode(BaseModel):
     children: list[TreeNode] = Field(default_factory=list)
 
 
+class WatcherOut(BaseModel):
+    running: bool          # 감시 데몬이 최근에 상태를 갱신했는가
+    state: str             # idle | analyzing | off
+    loose: int
+    ready: int
+    failed: int
+    message: str
+    updated_at: datetime | None
+
+
 class StatsOut(BaseModel):
     target_dir: str
     loose_files: int

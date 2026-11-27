@@ -11,6 +11,7 @@
 | moves         | 실제로 옮긴 파일 1개의 기록                          |
 | file_records  | 검색용 색인: 지금 위치, 제목, 요약, 키워드            |
 | analysis_cache| Gemini 분석 결과 저장 (같은 내용 파일은 다시 묻지 않음) |
+| watcher_status| 폴더 감시 데몬의 현재 상태 (대시보드 표시용, 1행)      |
 """
 from __future__ import annotations
 
@@ -142,6 +143,19 @@ class AnalysisCache(Base):
     key: Mapped[str] = mapped_column(String(80), primary_key=True)
     insight: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WatcherStatus(Base):
+    """폴더 감시 데몬(app/watcher.py)이 주기적으로 갱신하는 상태 1행."""
+    __tablename__ = "watcher_status"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    state: Mapped[str] = mapped_column(String(16), default="idle")  # idle | analyzing | off
+    loose: Mapped[int] = mapped_column(Integer, default=0)          # 정리 폴더 맨 위의 파일 수
+    ready: Mapped[int] = mapped_column(Integer, default=0)          # 미리 분석이 끝났거나 AI가 필요 없는 파일 수
+    failed: Mapped[int] = mapped_column(Integer, default=0)         # AI 분석이 실패해 나중에 다시 할 파일 수
+    message: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
 # ---------------------------------------------------------------------------

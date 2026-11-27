@@ -66,6 +66,9 @@ class Settings:
         # 이미지 속 글자를 내 컴퓨터에서 읽어(OCR) 민감 정보가 보이면 AI로 보내지 않는다.
         self.ocr_enabled = _bool("OCR_ENABLED", True) and shutil.which("tesseract") is not None
         self.old_installer_days = max(1, _int("OLD_INSTALLER_DAYS", 30))
+        # 폴더 감시 데몬(app/watcher.py): 확인 주기, 실패한 파일을 다시 시도하기까지의 시간(초)
+        self.watch_interval_seconds = max(3, _int("WATCH_INTERVAL_SECONDS", 15))
+        self.watch_retry_seconds = max(30, _int("WATCH_RETRY_SECONDS", 600))
         self.extract_workers = max(1, _int("EXTRACT_WORKERS", 4))
 
     @property

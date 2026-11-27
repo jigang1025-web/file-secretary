@@ -21,6 +21,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from . import analyzer
@@ -235,6 +236,15 @@ def _cache_key(sha: str, cfg, want_image: bool) -> str:
     return hashlib.sha256(basis.encode()).hexdigest()
 
 
+def _store_cache(session, key: str, ins: analyzer.Insight) -> None:
+    """분석 결과 저장. 감시 데몬과 API가 같은 파일을 동시에 저장해도 오류 없이 넘어간다."""
+    try:
+        session.merge(AnalysisCache(key=key, insight=dataclasses.asdict(ins)))
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+
+
 def _analyze_with_cache(session, inputs, works, cfg, want_image) -> dict:
     """저장된 Gemini 결과가 있는 파일은 그대로 쓰고, 처음 보는 파일만 Gemini에 보낸다."""
     if not (settings.use_gemini and settings.llm_cache) or not inputs:
@@ -256,17 +266,15 @@ def _analyze_with_cache(session, inputs, works, cfg, want_image) -> dict:
         for inp in misses:
             ins = fresh.get(inp.index)
             if ins and ins.source == "gemini":  # 실패해서 규칙 기반으로 대신한 결과는 저장하지 않음
-                session.merge(AnalysisCache(key=keys[inp.index], insight=dataclasses.asdict(ins)))
-        session.commit()
+                _store_cache(session, keys[inp.index], ins)
     log.info("AI 분석: 저장된 결과 %d개, 새로 분석 %d개", len(inputs) - len(misses), len(misses))
     return insights
 
 
-def build_plan(session: Session, root: Path, cfg: AppSettings, limit: int | None = None) -> Plan:
-    root = root.resolve()
-    limit = min(limit or settings.max_files_per_scan, settings.max_files_per_scan)
+def _collect(session: Session, root: Path, paths: list[Path]) -> list[_Work]:
+    """① 파일 정보와 내용 지문 → ② 중복 표시 → 오래된 설치 파일 표시."""
     works: list[_Work] = []
-    for p in list_candidates(root, limit):
+    for p in paths:
         st = p.stat()
         works.append(_Work(path=p, rel=rel(root, p), size=st.st_size, mtime=st.st_mtime,
                            sha=file_hash(p), ext=p.suffix.lower(), kind=kind_of(p.suffix)))
@@ -294,11 +302,11 @@ def build_plan(session: Session, root: Path, cfg: AppSettings, limit: int | None
     for w in works:
         if w.kind == "installer" and now - w.mtime > settings.old_installer_days * 86400:
             w.flags.append(f"{settings.old_installer_days}일 넘은 설치 파일 — 지워도 되는지 확인해 보세요")
+    return works
 
-    # ③ 내용 추출 (병렬) → 민감 판별 → 가리기
-    targets = [w for w in works if not w.duplicate_of]
-    want_image = settings.use_gemini and cfg.analyze_images
 
+def _extract_all(targets: list[_Work], cfg: AppSettings, want_image: bool) -> None:
+    """③ 내용 추출 (병렬) → 민감 판별 → 가리기."""
     def _extract(w: _Work) -> Extracted:
         return extract(w.path, settings.max_text_chars, want_image=want_image,
                        ocr=settings.ocr_enabled and w.kind == "image")
@@ -311,7 +319,9 @@ def build_plan(session: Session, root: Path, cfg: AppSettings, limit: int | None
             if not w.sensitive:
                 w.masked_text, _ = mask_text(ex.text)
 
-    # ④ AI 분석 (민감 파일 제외)
+
+def _make_inputs(works: list[_Work], want_image: bool) -> list[analyzer.AnalysisInput]:
+    """④ AI에 보낼 입력 (중복·민감·추출 안 한 파일 제외)."""
     inputs: list[analyzer.AnalysisInput] = []
     for i, w in enumerate(works):
         if w.duplicate_of or w.sensitive or w.extracted is None:
@@ -323,6 +333,43 @@ def build_plan(session: Session, root: Path, cfg: AppSettings, limit: int | None
             text=w.masked_text, ocr_text=ex.ocr_text,
             image=ex.image if want_image else None, image_mime=ex.image_mime,
             document=ex.document if settings.use_gemini else None))
+    return inputs
+
+
+def prefetch(session: Session, root: Path, cfg: AppSettings, paths: list[Path]) -> dict[str, str]:
+    """감시 데몬용: 새 파일을 미리 Gemini로 분석해 저장만 한다 (계획은 만들지 않음).
+
+    돌려주는 값: {상대 경로: "ai"(AI 결과 저장됨) | "local"(중복·민감 → AI 불필요) | "failed"(나중에 다시)}
+    """
+    root = root.resolve()
+    if not (settings.use_gemini and settings.llm_cache) or not paths:
+        return {}
+    works = _collect(session, root, paths)
+    want_image = cfg.analyze_images
+    keys = {w.rel: _cache_key(w.sha, cfg, want_image) for w in works if not w.duplicate_of}
+    have = set(session.scalars(select(AnalysisCache.key).where(AnalysisCache.key.in_(keys.values()))))
+    session.commit()
+    todo = [w for w in works if not w.duplicate_of and keys[w.rel] not in have]
+    _extract_all(todo, cfg, want_image)
+    insights = _analyze_with_cache(session, _make_inputs(works, want_image), works, cfg, want_image)
+    outcome: dict[str, str] = {}
+    for i, w in enumerate(works):
+        if w.duplicate_of or w.sensitive:
+            outcome[w.rel] = "local"
+        elif keys[w.rel] in have or (insights.get(i) and insights[i].source == "gemini"):
+            outcome[w.rel] = "ai"
+        else:
+            outcome[w.rel] = "failed"
+    return outcome
+
+
+def build_plan(session: Session, root: Path, cfg: AppSettings, limit: int | None = None) -> Plan:
+    root = root.resolve()
+    limit = min(limit or settings.max_files_per_scan, settings.max_files_per_scan)
+    works = _collect(session, root, list_candidates(root, limit))
+    want_image = settings.use_gemini and cfg.analyze_images
+    _extract_all([w for w in works if not w.duplicate_of], cfg, want_image)
+    inputs = _make_inputs(works, want_image)
     insights = _analyze_with_cache(session, inputs, works, cfg, want_image)
 
     # ⑤ 새 이름·폴더
