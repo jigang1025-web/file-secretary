@@ -38,21 +38,33 @@ git push -u origin feature/prompt-tuning
 git switch main && git pull
 ```
 
-## 3. 커밋 규칙
+## 3. 자동 검사 (GitHub Actions)
+
+`.github/workflows/ci.yml` — main에 올리거나 PR을 열면 GitHub가 자동으로:
+
+| 작업 | 내용 |
+|---|---|
+| test | 테스트 전체를 SQLite와 **PostgreSQL 컨테이너** 양쪽에서 실행 |
+| docker | `docker compose build`로 이미지 빌드 확인 + Trivy 이미지 취약점 검사(보고만) |
+| lint | `shellcheck scripts/*.sh` |
+
+PR 화면에 초록 체크(✔)가 뜨면 merge합니다. 빨간 X면 'Details'에서 실패 이유를 확인합니다.
+
+## 4. 커밋 규칙
 
 - `type(scope): 요약` 형식 (Conventional Commits). 예: `fix(planner): 같은 이름이 있으면 번호 붙이기`
 - 한 커밋에는 한 가지 목적만.
 
-## 4. 발표용 캡처 체크리스트
+## 5. 발표용 캡처 체크리스트
 
 | 강의 | 장면 |
 |---|---|
 | Git 1 | `git status`, `git add`, `git commit` |
 | Git 2 | `git diff`, 브랜치 생성·전환, conflict 해결 커밋, `git revert` |
-| Git 3 | `git push` / `git pull`, GitHub의 PR 목록 |
+| Git 3 | `git push` / `git pull`, GitHub의 PR 목록, PR의 자동 검사 초록 체크 |
 | 전체 | `git log --all --graph --oneline` — 브랜치와 merge가 보이는 그래프 |
 
-## 5. 주의
+## 6. 주의
 
 - `.env`는 절대 커밋하지 않습니다. 이미 올렸다면 키를 **재발급**하세요 (revert해도 이력에 남음).
 - `demo/inbox/` 안의 파일은 `.gitignore`에 있습니다 (연습 폴더는 매번 초기화).
