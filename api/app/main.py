@@ -29,7 +29,7 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import demo, mover, planner, shellscript
+from . import demo, knime_export, mover, planner, shellscript
 from .config import settings
 from .db import Batch, FileRecord, Plan, PlanItem, WatcherStatus, get_app_settings, get_session, init_db
 from .schemas import (BatchOut, FileOut, PlanCreate, PlanItemOut, PlanItemUpdate, PlanOut, PlanSummary,
@@ -290,6 +290,18 @@ def stats(session: Session = Depends(get_session)):
     last = session.scalar(select(Batch.id).order_by(Batch.id.desc()).limit(1))
     return StatsOut(target_dir=str(root), loose_files=loose, organized_files=organized or 0,
                     by_category={c: n for c, n in rows}, last_batch_id=last)
+
+
+@router.get("/export/knime.csv", response_class=PlainTextResponse, tags=["system"])
+def export_knime(session: Session = Depends(get_session)):
+    """KNIME 실습용 CSV: 정리 폴더의 파일마다 이름 특징·규칙 분류·Gemini 분류(저장된 것)·정답(연습 폴더).
+    Gemini를 새로 부르지 않는다."""
+    root = target_root()
+    cfg = get_app_settings(session)
+    answers = knime_export.load_answers(settings.samples_dir / "answers.csv")
+    text = knime_export.to_csv(knime_export.build_rows(session, root, cfg, answers))
+    return PlainTextResponse(text, media_type="text/csv; charset=utf-8",
+                             headers={"Content-Disposition": 'attachment; filename="knime_files.csv"'})
 
 
 @router.get("/watcher", response_model=WatcherOut, tags=["system"])
