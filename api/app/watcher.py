@@ -24,9 +24,11 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from sqlalchemy import select
+
 from .config import settings
-from . import db
-from .db import WatcherStatus, get_app_settings, init_db
+from . import db, search
+from .db import FileRecord, WatcherStatus, get_app_settings, init_db
 from .planner import list_candidates, prefetch
 
 log = logging.getLogger("app.watcher")
@@ -38,6 +40,7 @@ class WatchState:
     pending: dict[str, tuple[int, float]] = field(default_factory=dict)   # 처음 본 파일 (안정 확인 대기)
     done: dict[str, tuple[int, float]] = field(default_factory=dict)      # 분석 끝 (ai | local)
     failed: dict[str, tuple[tuple[int, float], float]] = field(default_factory=dict)  # 서명, 다시 시도할 시각
+    warm_retry: dict[str, float] = field(default_factory=dict)   # 미리 검색해 둘 질문 → 다시 시도할 시각
 
 
 def scan_once(state: WatchState, root: Path, now: float | None = None) -> dict:
@@ -103,6 +106,34 @@ def scan_once(state: WatchState, root: Path, now: float | None = None) -> dict:
     return summary
 
 
+def warm_once(state: WatchState, summary: dict, now: float | None = None) -> int:
+    """파일을 모두 미리 읽은 뒤, 자주 쓰는 검색 질문의 AI 답을 미리 받아 저장해 둔다.
+    화면에서 같은 질문을 하면 Gemini를 기다리지 않고 바로 나온다. 새로 저장한 질문 수를 돌려준다.
+    Gemini가 실패하면 그 질문만 WATCH_RETRY_SECONDS 뒤에 다시 시도한다."""
+    if not (settings.use_gemini and settings.llm_cache and settings.warm_queries):
+        return 0
+    now = time.time() if now is None else now
+    saved = 0
+    with db.SessionLocal() as session:
+        records = session.scalars(select(FileRecord)).all()
+        if not any(not r.sensitive for r in records):   # 아직 '살펴보기'로 색인된 파일이 없음
+            return 0
+        for q in settings.warm_queries:
+            if state.warm_retry.get(q, 0) > now or search.is_cached(session, q, records):
+                continue
+            _write_status("analyzing", summary["loose"], summary["ready"], summary["failed"],
+                          f"자주 쓰는 검색을 미리 준비하는 중 ('{q}')")
+            _answer, _hits, source = search.search(session, q, timeout=settings.warm_timeout_seconds)
+            if source == "gemini":
+                saved += 1
+                state.warm_retry.pop(q, None)
+                log.info("검색 미리 준비 완료: %s", q)
+            else:
+                state.warm_retry[q] = time.time() + settings.watch_retry_seconds
+                log.info("검색 미리 준비 실패 (%d초 뒤 다시 시도): %s", settings.watch_retry_seconds, q)
+    return saved
+
+
 def _write_status(state: str, loose: int, ready: int, failed: int, message: str) -> None:
     try:
         with db.SessionLocal() as session:
@@ -139,6 +170,8 @@ def main() -> None:
                 summary = scan_once(state, root)
                 if summary["analyzed_now"]:
                     log.info("미리 분석: %(analyzed_now)d개 (준비 %(ready)d/%(loose)d)", summary)
+                if summary["loose"] and summary["ready"] >= summary["loose"]:
+                    warm_once(state, summary)   # 파일을 다 읽었으면 자주 쓰는 검색도 미리 준비
             except Exception:  # noqa: BLE001 — 한 번 실패해도 데몬은 계속 돈다
                 log.exception("감시 중 오류 (다음 주기에 다시 시도)")
         for _ in range(settings.watch_interval_seconds):
