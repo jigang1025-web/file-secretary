@@ -10,6 +10,7 @@
 | GET    | /api/v1/batches                        | 정리 기록                              |
 | POST   | /api/v1/batches/{id}/undo              | 되돌리기                               |
 | GET    | /api/v1/files, /api/v1/files/{id}/content | 색인된 파일 목록, 파일 내려받기       |
+| GET    | /api/v1/files/{id}/open?exp&sig          | 서명 링크로 브라우저에서 파일 열기   |
 | GET    | /api/v1/search?q=                      | 말로 검색                              |
 | GET    | /api/v1/tree, /api/v1/stats            | 폴더 구조·통계 (화면용)                 |
 | GET/PUT| /api/v1/settings                       | 설정 조회·전체 교체                     |
@@ -20,6 +21,7 @@
 from __future__ import annotations
 
 import logging
+import mimetypes
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,7 +37,7 @@ from .db import Batch, FileRecord, Plan, PlanItem, WatcherStatus, get_app_settin
 from .schemas import (BatchOut, FileOut, PlanCreate, PlanItemOut, PlanItemUpdate, PlanOut, PlanSummary,
                       SearchHit, SearchOut, SettingsIn, SettingsOut, StatsOut, TreeNode, WatcherOut)
 from .search import search as run_search
-from .security import require_api_key
+from .security import check_file_link, require_api_key
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -231,8 +233,7 @@ def list_files(category: str | None = None, course: str | None = None,
     return session.scalars(stmt).all()
 
 
-@router.get("/files/{file_id}/content", tags=["files"])
-def download_file(file_id: int, session: Session = Depends(get_session)):
+def _file_path(file_id: int, session: Session) -> Path:
     rec = session.get(FileRecord, file_id)
     if rec is None:
         raise HTTPException(status_code=404, detail="파일 기록이 없습니다.")
@@ -242,6 +243,12 @@ def download_file(file_id: int, session: Session = Depends(get_session)):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not path.is_file():
         raise HTTPException(status_code=404, detail="파일이 그 위치에 없습니다 (옮겼거나 지웠나요?).")
+    return path
+
+
+@router.get("/files/{file_id}/content", tags=["files"])
+def download_file(file_id: int, session: Session = Depends(get_session)):
+    path = _file_path(file_id, session)
     return FileResponse(path, filename=path.name)
 
 
@@ -342,3 +349,28 @@ def demo_reset(session: Session = Depends(get_session)):
 
 
 app.include_router(router)
+
+
+def _text_charset(path: Path) -> str:
+    """메모장 파일은 UTF-8도 있고 윈도우 한글(CP949)도 있어서, 브라우저가 깨지지 않게 인코딩을 알려 준다."""
+    head = path.read_bytes()[:65536]
+    for enc, name in (("utf-8", "utf-8"), ("cp949", "euc-kr")):
+        try:
+            head.decode(enc)
+            return name
+        except UnicodeDecodeError:
+            continue
+    return "utf-8"
+
+
+@app.get("/api/v1/files/{file_id}/open", tags=["files"])
+def open_file(file_id: int, exp: int = Query(...), sig: str = Query(..., max_length=128),
+              session: Session = Depends(get_session)):
+    """검색 결과의 제목을 누르면 브라우저 새 탭에서 파일을 연다.
+    브라우저 링크는 X-API-Key 헤더를 보낼 수 없으므로, 대시보드가 API 키로 만든 만료 시간 있는 서명을 확인한다."""
+    check_file_link(file_id, exp, sig)
+    path = _file_path(file_id, session)
+    media, _ = mimetypes.guess_type(path.name)
+    if media and media.startswith("text/"):
+        media += f"; charset={_text_charset(path)}"
+    return FileResponse(path, media_type=media, filename=path.name, content_disposition_type="inline")

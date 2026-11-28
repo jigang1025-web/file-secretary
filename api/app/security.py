@@ -1,4 +1,4 @@
-"""보안: ① API 키 인증 ② 민감 파일 판별 ③ AI로 보내기 전 개인정보 가리기(masking).
+"""보안: ① API 키 인증(+ 파일 열기용 서명 링크) ② 민감 파일 판별 ③ AI로 보내기 전 개인정보 가리기(masking).
 
 Gemini 무료 등급 약관에는 '보낸 내용이 제품 개선에 쓰이고 사람이 검토할 수 있으니
 민감한 정보는 보내지 말라'고 적혀 있다. 그래서
@@ -7,8 +7,11 @@ Gemini 무료 등급 약관에는 '보낸 내용이 제품 개선에 쓰이고 �
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import re
 import secrets
+import time
 from dataclasses import dataclass
 
 from fastapi import Header, HTTPException, status
@@ -25,6 +28,26 @@ def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
     if not x_api_key or not secrets.compare_digest(x_api_key, settings.api_key):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                             detail="X-API-Key 헤더가 없거나 틀렸습니다.")
+
+
+FILE_LINK_SECONDS = 3600          # 대시보드가 만든 '파일 열기' 링크의 유효 시간
+FILE_LINK_MAX_SECONDS = 7 * 24 * 3600
+
+
+def file_link_signature(file_id: int, exp: int) -> str:
+    """브라우저에서 헤더 없이 파일을 열 수 있게 하는 서명 (HMAC-SHA256, 키 = API 키)."""
+    key = (settings.api_key or "local-dev").encode()
+    return hmac.new(key, f"file:{file_id}:{exp}".encode(), hashlib.sha256).hexdigest()
+
+
+def check_file_link(file_id: int, exp: int, sig: str, now: float | None = None) -> None:
+    """서명이 맞고 만료 전인지 확인. API 키를 쓰지 않는 개발 환경에서는 통과."""
+    if not settings.api_key:
+        return
+    now = time.time() if now is None else now
+    if not (now <= exp <= now + FILE_LINK_MAX_SECONDS) or not hmac.compare_digest(sig, file_link_signature(file_id, exp)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="파일 열기 링크가 틀렸거나 만료되었습니다. 검색을 다시 해 주세요.")
 
 
 # ---------------------------------------------------------------------------

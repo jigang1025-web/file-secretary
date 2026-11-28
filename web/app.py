@@ -5,6 +5,8 @@ API 서버(FastAPI)를 REST로 호출해서 화면에 보여 주는 '클라이�
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import html
 import os
 import time
@@ -26,7 +28,7 @@ PATTERNS = {
     "title_date": "제목_날짜  (기말 프로젝트 안내_2026-11-09.pdf)",
     "title_only": "제목만  (기말 프로젝트 안내.pdf)",
 }
-SOURCE_LABEL = {"gemini": "Gemini", "mock": "규칙", "fallback": "규칙(대체)", "rule": "보호·중복"}
+STATUS_LABEL = {"moved": "옮김", "skipped": "건너뜀", "undone": "되돌림", "undo_failed": "되돌리기 실패"}
 EXT_LABEL = {"pdf": "PDF", "jpg": "IMG", "jpeg": "IMG", "png": "IMG", "gif": "IMG", "webp": "IMG", "heic": "IMG",
              "doc": "DOC", "docx": "DOC", "hwp": "HWP", "hwpx": "HWP", "txt": "TXT", "md": "TXT",
              "xls": "XLS", "xlsx": "XLS", "csv": "XLS", "ppt": "PPT", "pptx": "PPT",
@@ -53,14 +55,16 @@ html, body, .stApp, .stApp button, .stApp input, .stApp textarea {
 .stApp {background: var(--bg); color: var(--ink);}
 header[data-testid="stHeader"], [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"],
 [data-testid="stHeaderActionElements"] {display: none !important;}
-.block-container {padding: 0 2.25rem 3rem; max-width: 1400px;}
 h1, h2, h3, h4, h5 {color: var(--ink); letter-spacing: -0.02em;}
 .stApp a {color: var(--acc-ink);}
 
-/* ---- 상단 바: 로고 + (탭 메뉴가 가운데로 올라옴) + 상태 알약 ---- */
-.fs-top {position: relative; left: 50%; width: 100vw; margin-left: -50vw; background: var(--card);
-         border-bottom: 1px solid var(--line); height: 64px; margin: -1rem 0 26px -50vw;}
-.fs-top .in {max-width: 1400px; margin: 0 auto; padding: 0 2.25rem; height: 64px; display: flex; align-items: center;}
+/* ---- 레이아웃: 위에 고정된 상단 바(로고) + 왼쪽에 고정된 세로 메뉴(탭) ---- */
+:root {--top-h: 64px; --nav-w: 220px;}
+.block-container {max-width: calc(1400px + var(--nav-w)) !important; margin-left: 0 !important;
+                  padding: calc(var(--top-h) + 28px) 2.5rem 3rem calc(var(--nav-w) + 2.5rem) !important;}
+.fs-top {position: fixed; left: 0; top: 0; width: 100vw; height: var(--top-h); z-index: 40;
+         background: var(--card); border-bottom: 1px solid var(--line);}
+.fs-top .in {height: var(--top-h); padding: 0 24px; display: flex; align-items: center;}
 .fs-brand {display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 1.15rem; white-space: nowrap;}
 .fs-logo {width: 30px; height: 30px; border-radius: 9px; background: var(--acc); color: #fff; display: grid;
           place-items: center; font-size: .95rem; font-weight: 800;}
@@ -72,20 +76,30 @@ h1, h2, h3, h4, h5 {color: var(--ink); letter-spacing: -0.02em;}
 .fs-dot.busy {background: var(--acc); animation: fs-blink 1.2s infinite;}
 @keyframes fs-blink {50% {opacity: .25;}}
 
-div[data-testid="stTabs"] [role="tablist"] {gap: 4px; background: transparent; border: 0 !important; box-shadow: none !important;
-  position: relative; z-index: 5; width: fit-content; margin: -76px 0 24px 210px;}
+div[data-testid="stTabs"] [role="tablist"] {position: fixed !important; left: 0; top: var(--top-h); bottom: 0; z-index: 30;
+  width: var(--nav-w); box-sizing: border-box; margin: 0 !important; padding: 24px 16px;
+  display: flex; flex-direction: column; align-items: stretch; gap: 6px;
+  background: var(--card); border: 0 !important; border-right: 1px solid var(--line) !important; box-shadow: none !important;}
 div[data-testid="stTabs"] [role="tablist"]::before, div[data-testid="stTabs"] [role="tablist"]::after {display: none !important;}
 div[data-testid="stTabs"] > div > div:first-child {border: 0 !important; box-shadow: none !important;}
 div[data-testid="stTabs"] .react-aria-SelectionIndicator {display: none !important;}
-div[data-testid="stTab"] {padding: 8px 14px !important; border-radius: 9px; height: auto; background: transparent; margin: 0 !important;}
-div[data-testid="stTab"] p {font-size: .95rem !important; font-weight: 600; color: var(--sub);}
+div[data-testid="stTab"] {padding: 12px 16px !important; border-radius: 10px; height: auto; background: transparent;
+  margin: 0 !important; width: 100%; box-sizing: border-box; justify-content: flex-start;}
+div[data-testid="stTab"] p {font-size: 1rem !important; font-weight: 600; color: var(--sub); display: flex; align-items: center; gap: 10px;}
+div[data-testid="stTab"] p span[role="img"] {font-size: 1.3rem !important; color: inherit;}
+div[data-testid="stTab"]:hover {background: var(--muted-soft);}
 div[data-testid="stTab"]:hover p {color: var(--ink);}
 div[data-testid="stTab"][aria-selected="true"] {background: var(--acc-soft);}
 div[data-testid="stTab"][aria-selected="true"] p {color: var(--acc-ink);}
-@media (max-width: 1180px) {
-  .fs-top {height: auto;} .fs-top .in {height: auto; flex-wrap: wrap; padding-top: 12px; padding-bottom: 12px; gap: 10px;}
-  .fs-pills {margin-left: 0; justify-content: flex-start;}
-  div[data-testid="stTabs"] [role="tablist"] {margin: -12px 0 22px 0;}
+
+/* 좁은 화면(크게 확대했을 때): 왼쪽 메뉴를 아이콘만 남겨 폭을 줄인다 */
+@media (max-width: 900px) {
+  :root {--nav-w: 72px;}
+  .block-container {padding-left: calc(var(--nav-w) + 1.25rem) !important; padding-right: 1.25rem !important;}
+  div[data-testid="stTabs"] [role="tablist"] {padding: 20px 10px;}
+  div[data-testid="stTab"] {justify-content: center; padding: 12px 0 !important;}
+  div[data-testid="stTab"] p {font-size: 0 !important; gap: 0;}
+  div[data-testid="stTab"] p span[role="img"] {font-size: 1.5rem !important;}
 }
 
 /* ---- 버튼 ---- */
@@ -166,6 +180,7 @@ div[data-testid="stCode"] pre {border-radius: 12px;}
 .st-key-searchbox input {font-size: 1.05rem; background: var(--bg) !important; border: 0 !important; padding: 12px 14px !important;}
 .st-key-searchbox [data-baseweb="input"] {border: 0 !important; background: var(--bg) !important; border-radius: 11px !important;}
 .st-key-searchbox button {height: 46px;}
+.stApp [data-testid="stButtonGroup"] > div {flex-wrap: wrap;}
 .stApp [data-testid="stButtonGroup"] button {border-radius: 999px; border: 1px solid var(--line);
   background: var(--card); font-weight: 600;}
 .fs-answer {background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--acc); border-radius: 16px;
@@ -178,7 +193,8 @@ div[data-testid="stCode"] pre {border-radius: 12px;}
          display: grid; grid-template-columns: 44px 1fr; gap: 14px; align-items: start;}
 .fs-ico {width: 44px; height: 44px; border-radius: 12px; background: var(--acc-soft); color: var(--acc-ink);
          display: grid; place-items: center; font-weight: 800; font-size: .72rem;}
-.fs-res .t {font-weight: 700; font-size: 1.02rem;}
+.fs-res .t {font-weight: 700; font-size: 1.02rem; color: var(--ink) !important; text-decoration: none; display: inline-block;}
+.fs-res a.t:hover {color: var(--acc-ink) !important; text-decoration: underline;}
 .fs-res .p {color: var(--sub); font-size: .8rem; margin: 2px 0 8px; font-family: ui-monospace, Menlo, Consolas, monospace;
             word-break: break-all;}
 .fs-res .s {color: #44403C; margin-top: 8px; font-size: .92rem;}
@@ -196,14 +212,14 @@ def api(method: str, path: str, timeout: int = 60, **kwargs):
     try:
         r = requests.request(method, f"{API_URL}{path}", headers=headers, timeout=timeout, **kwargs)
     except requests.RequestException:
-        st.error(f"API 서버({API_URL})에 연결할 수 없습니다. 서버가 켜져 있는지 확인해 주세요.")
+        st.error(f"서비스에 연결할 수 없어요. Docker Desktop이 켜져 있는지 확인해 주세요. ({API_URL})")
         st.stop()
     if r.status_code >= 400:
         try:
             detail = r.json().get("detail", r.text)
         except ValueError:
             detail = r.text
-        st.error(f"요청 실패 ({r.status_code}): {detail}")
+        st.error(f"요청을 처리하지 못했어요 ({r.status_code}): {detail}")
         return None
     if r.status_code == 204 or not r.content:
         return {}
@@ -230,6 +246,18 @@ def human(n: int) -> str:
     return f"{n}B"
 
 
+def file_link(file_id: int) -> str:
+    """브라우저 새 탭에서 파일을 여는 주소. API 서버가 확인하는 만료 시간 있는 서명을 붙인다 (1시간)."""
+    exp = int(time.time()) + 3600
+    sig = hmac.new((API_KEY or "local-dev").encode(), f"file:{file_id}:{exp}".encode(), hashlib.sha256).hexdigest()
+    return f"{PUBLIC_API_URL}/api/v1/files/{file_id}/open?exp={exp}&sig={sig}"
+
+
+def plain_summary(text: str) -> str:
+    """서버가 붙이는 개발용 표시('(규칙 기반)')는 사용자 화면에서 뺀다."""
+    return (text or "").replace("(규칙 기반) ", "").replace("(규칙 기반)", "").strip()
+
+
 def esc(s) -> str:
     return html.escape(str(s or ""))
 
@@ -240,7 +268,7 @@ def note(text: str, kind: str = "") -> None:
 
 
 def steps(current: int) -> None:
-    labels = ["폴더 살펴보기", "제안 확인·수정", "정리 완료"]
+    labels = ["폴더 살펴보기", "정리안 확인", "정리 완료"]
     out = []
     for i, label in enumerate(labels, 1):
         cls, mark = ("done", "✓") if i < current else (("on", str(i)) if i == current else ("", str(i)))
@@ -324,42 +352,36 @@ def pill(text: str, dot: str = "", title: str = "") -> str:
 
 def watcher_pill(w: dict) -> str:
     if not w.get("running"):
-        return pill("폴더 감시 · 꺼짐", "off")
+        return pill("폴더 감시 데몬 · 꺼짐", "off")
     total, ready = w.get("loose", 0), w.get("ready", 0)
     if w.get("state") == "analyzing":
         if w.get("message", "").startswith("자주 쓰는 검색"):
-            return pill("폴더 감시 · 검색 미리 준비 중", "busy", w.get("message", ""))
-        return pill(f"폴더 감시 · 미리 읽는 중 {ready}/{total}", "busy", w.get("message", ""))
+            return pill("폴더 감시 데몬 · 검색 미리 준비 중", "busy", w.get("message", ""))
+        return pill(f"폴더 감시 데몬 · 미리 분석 중 {ready}/{total}", "busy", w.get("message", ""))
     if total:
-        return pill(f"폴더 감시 · {ready}/{total} 준비됨", "", w.get("message", ""))
-    return pill("폴더 감시 · 켜짐", "", w.get("message", ""))
+        return pill(f"폴더 감시 데몬 · {ready}/{total} 준비됨", "", w.get("message", ""))
+    return pill("폴더 감시 데몬 · 켜짐", "", w.get("message", ""))
 
 
-LIVE_SECONDS = 4  # 상단 상태와 시작 화면을 몇 초마다 저절로 새로 고칠지
+LIVE_SECONDS = 4  # 시작 화면과 개발자용 상태를 몇 초마다 저절로 새로 고칠지
 
 
-@st.fragment(run_every=LIVE_SECONDS)
 def top_bar() -> None:
-    """상단 바. 이 부분만 몇 초마다 다시 그려서 폴더 감시 진행 상황이 실시간으로 바뀐다."""
-    w = api("GET", "/api/v1/watcher") or {}
-    st.markdown(
-        '<div class="fs-top"><div class="in"><div class="fs-brand"><div class="fs-logo">F</div>파일 정리 비서</div>'
-        '<div class="fs-pills">'
-        + pill(f"Gemini · {cfg.get('gemini_model', '')}" if is_gemini else "AI 분석 · 규칙 기반", "" if is_gemini else "off")
-        + watcher_pill(w)
-        + pill("OCR " + ("켜짐" if cfg.get("ocr_enabled") else "꺼짐"), "" if cfg.get("ocr_enabled") else "off")
-        + "</div></div></div>", unsafe_allow_html=True)
+    """상단 바: 로고와 메뉴만. AI·폴더 감시·OCR 상태는 사용자가 알 필요가 없어 설정 탭의 개발자 정보로 옮겼다."""
+    st.markdown('<div class="fs-top"><div class="in"><div class="fs-brand"><div class="fs-logo">F</div>파일 정리 비서</div>'
+                '</div></div>', unsafe_allow_html=True)
 
 
 top_bar()
-tab_clean, tab_find, tab_log, tab_cfg = st.tabs(["정리하기", "찾기", "정리 기록", "설정"])
+tab_clean, tab_find, tab_log, tab_cfg = st.tabs([":material/folder_open: 정리하기", ":material/search: 찾기",
+                                                ":material/history: 정리 기록", ":material/settings: 설정"])
 
 
 # ---------------------------------------------------------------------------
 # 1. 정리하기
 # ---------------------------------------------------------------------------
 def start_scan() -> None:
-    with st.spinner("AI가 파일 내용을 읽고 있습니다… (파일 수와 이미지 개수에 따라 수십 초 걸릴 수 있어요)"):
+    with st.spinner("AI가 파일을 읽고 있어요… 파일이 많으면 조금 걸릴 수 있어요."):
         plan = api("POST", "/api/v1/plans", json={}, timeout=900)
     if plan is not None:
         st.session_state["plan"] = plan
@@ -370,10 +392,10 @@ def start_scan() -> None:
 def item_note(it: dict) -> str:
     notes = []
     if it["sensitive"]:
-        notes.append(f"AI에 안 보냄 ({it['sensitive_reason']})")
+        notes.append(f"AI에 안 보여 줌 ({it['sensitive_reason']})")
     notes += it["flags"]
-    if it.get("error"):
-        notes.append(f"오류: {it['error']}")
+    if it.get("error") and it.get("source") != "fallback":  # AI 대신 규칙으로 분류한 사유는 개발용 정보라 숨김
+        notes.append(f"문제: {it['error']}")
     return " · ".join(notes)
 
 
@@ -382,51 +404,52 @@ def start_view() -> None:
     """1단계 시작 화면. 새 파일이 들어오거나 미리 읽기가 끝나면 저절로 바뀐다."""
     steps(1)
     live_stats = api("GET", "/api/v1/stats") or {}
-    live_w = api("GET", "/api/v1/watcher") or {}
     loose = live_stats.get("loose_files", 0)
-    heading(f"정리 폴더에 흩어진 파일 {loose}개",
-            "AI가 파일 <b>내용</b>을 읽고 새 이름과 폴더를 제안합니다. 파일은 <b>확인을 누르기 전까지 옮기지 않습니다.</b>")
+    heading(f"정리가 필요한 파일이 {loose}개 있어요",
+            "AI가 파일을 열어 보고 알아보기 쉬운 이름과 폴더를 골라 드려요. <b>확인을 누르기 전에는 아무것도 옮기지 않아요.</b>")
     st.markdown(
         '<div class="fs-kpis">'
-        f'<div class="fs-kpi hl"><small>흩어진 파일</small><b>{loose}</b></div>'
+        f'<div class="fs-kpi hl"><small>정리할 파일</small><b>{loose}</b></div>'
         f'<div class="fs-kpi"><small>정리된 파일</small><b>{live_stats.get("organized_files", 0)}</b></div>'
-        f'<div class="fs-kpi"><small>미리 읽어 둔 파일</small><b>{live_w.get("ready", 0)}</b></div>'
         '</div>', unsafe_allow_html=True)
     left, right = st.columns([2, 3], gap="large")
     with left:
         with st.container(border=True, key="card-2"):
             st.markdown('<div class="fs-sec">폴더 살펴보기</div>', unsafe_allow_html=True)
-            if live_w.get("running") and loose:
-                ready, total = live_w.get("ready", 0), live_w.get("loose", 0)
-                if total and ready >= total:
-                    note("폴더 감시 데몬이 새 파일을 <b>모두 미리 읽어 두었습니다.</b> 살펴보기가 바로 끝납니다.", "done")
-                else:
-                    note(f"폴더 감시 데몬이 새 파일을 미리 읽는 중입니다 (<b>{ready}/{total}</b>). "
-                         "끝난 뒤에 누르면 기다리지 않습니다. 진행 상황은 화면에 저절로 반영됩니다.", "acc")
-            st.write("Gemini가 문서·이미지 내용을 읽고 **이름 짓기 → 분류 → 폴더 제안**까지 한 번에 합니다. "
-                     "신분증·통장 같은 민감 파일은 AI에 보내지 않습니다.")
+            st.write("누르면 AI가 문서와 사진 내용을 읽고 **새 이름 → 종류 → 넣을 폴더**를 한 번에 정해 드려요. "
+                     "신분증·통장 같은 개인 서류는 AI에게 보여 주지 않아요.")
             if st.button("폴더 살펴보기", type="primary", disabled=loose == 0, use_container_width=True):
                 start_scan()
             if loose == 0:
-                st.caption("정리할 파일이 없습니다. 설정 탭의 '연습 폴더 초기화'로 샘플을 넣어 보세요.")
+                st.caption("정리할 파일이 없어요. 설정 탭에서 '연습 폴더 초기화'를 누르면 연습용 파일이 들어와요.")
     with right:
         tree = api("GET", "/api/v1/tree", params={"depth": 1}) or {}
         st.markdown(panel("정리 전", f"{loose}개", render_tree(tree_from_api(tree), "정리 폴더", max_files=12)),
                     unsafe_allow_html=True)
 
 
+@st.fragment(run_every=LIVE_SECONDS)
+def dev_status() -> None:
+    """개발자용 서비스 상태 (사용자 화면에는 보이지 않고 설정 탭에만). 몇 초마다 저절로 갱신."""
+    w = api("GET", "/api/v1/watcher") or {}
+    with st.container(border=True, key="card-dev"):
+        st.markdown('<div class="fs-sec">서비스 상태 (개발자용)</div>'
+                    '<div class="fs-pills" style="margin:0 0 10px 0;justify-content:flex-start">'
+                    + pill(f"Gemini · {cfg.get('gemini_model', '')}" if is_gemini else "AI 꺼짐 · 규칙 기반", "" if is_gemini else "off")
+                    + watcher_pill(w)
+                    + pill("OCR " + ("켜짐" if cfg.get("ocr_enabled") else "꺼짐"), "" if cfg.get("ocr_enabled") else "off")
+                    + "</div>", unsafe_allow_html=True)
+
+
 with tab_clean:
     plan = st.session_state.get("plan")
     batch = st.session_state.get("batch")
-    if not is_gemini:
-        note("AI 분석이 <b>규칙 기반</b>입니다. <code>.env</code>에 <code>GEMINI_API_KEY</code>를 넣으면 AI가 파일 내용을 읽습니다.",
-             "warn")
 
     if batch:  # ---- 3단계: 정리 직후 ----
         steps(3)
-        heading(f"파일 {batch['moved']}개를 정리했습니다",
-                "잘못 옮겨졌다면 <b>되돌리기</b> 한 번으로 원래 자리로 돌아갑니다."
-                + (f" (건너뜀 {batch['skipped']}개)" if batch["skipped"] else ""))
+        heading(f"파일 {batch['moved']}개를 정리했어요",
+                "잘못 옮겨졌다면 <b>되돌리기</b>를 누르세요. 모두 원래 자리로 돌아가요."
+                + (f" (옮기지 못한 파일 {batch['skipped']}개)" if batch["skipped"] else ""))
         skipped = [m for m in batch["moves"] if m["status"] == "skipped"]
         tree = api("GET", "/api/v1/tree", params={"depth": 3}) or {}
         left, right = st.columns([3, 2], gap="large")
@@ -437,24 +460,20 @@ with tab_clean:
         with right:
             with st.container(border=True, key="card-1"):
                 st.markdown('<div class="fs-sec">다음 할 일</div>', unsafe_allow_html=True)
-                note("<b>찾기</b> 탭에서 '기말 프로젝트 공지'처럼 말로 검색해 보세요.", "acc")
+                note("이제 <b>찾기</b> 탭에서 '기말 프로젝트 공지'처럼 말로 찾아보세요.", "acc")
                 if st.button("방금 정리 되돌리기", type="primary", use_container_width=True):
                     res = api("POST", f"/api/v1/batches/{batch['id']}/undo")
                     if res is not None:
                         st.session_state.pop("batch", None)
                         st.session_state.pop("plan", None)
-                        st.toast("원래대로 되돌렸습니다.")
+                        st.toast("원래대로 되돌렸어요.")
                         st.rerun()
                 if st.button("다시 살펴보기", use_container_width=True):
                     start_scan()
             if skipped:
-                with st.expander(f"건너뛴 파일 {len(skipped)}개"):
+                with st.expander(f"옮기지 못한 파일 {len(skipped)}개"):
                     for m in skipped:
                         st.write(f"- `{m['src_rel']}` — {m['error']}")
-            with st.expander("되돌리기를 리눅스 명령어로 보기"):
-                undo = api("GET", f"/api/v1/batches/{batch['id']}/script")
-                if isinstance(undo, (bytes, bytearray)):
-                    st.code(undo.decode("utf-8"), language="bash")
 
     elif not plan:  # ---- 1단계: 시작 화면 (실시간) ----
         start_view()
@@ -466,18 +485,16 @@ with tab_clean:
         n_dup = sum(i["dest_dir"] == "중복 파일" for i in items)
         n_old = sum(any("설치 파일" in f for f in i["flags"]) for i in items)
         n_ai = sum(i["source"] == "gemini" for i in items)
-        heading("AI의 정리 제안을 확인하세요",
-                "파일은 <b>확인을 누르기 전까지 옮기지 않습니다.</b> 이름과 폴더는 아래 표에서 바로 고칠 수 있습니다.")
+        heading("AI가 정리 방법을 골랐어요",
+                "<b>확인을 누르기 전에는 아무것도 옮기지 않아요.</b> 이름이나 폴더가 마음에 안 들면 아래 표에서 바로 고칠 수 있어요.")
         st.markdown(
             '<div class="fs-kpis">'
             f'<div class="fs-kpi"><small>살펴본 파일</small><b>{len(items)}</b></div>'
-            f'<div class="fs-kpi hl"><small>AI가 내용을 읽은 파일</small><b>{n_ai if is_gemini else "규칙"}</b></div>'
-            f'<div class="fs-kpi"><small>민감 파일 (AI에 안 보냄)</small><b>{n_sensitive}</b></div>'
-            f'<div class="fs-kpi"><small>중복 파일</small><b>{n_dup}</b></div>'
+            f'<div class="fs-kpi hl"><small>AI가 내용을 읽은 파일</small><b>{n_ai if is_gemini else "-"}</b></div>'
+            f'<div class="fs-kpi"><small>개인 서류 (AI에 안 보여 줌)</small><b>{n_sensitive}</b></div>'
+            f'<div class="fs-kpi"><small>똑같은 파일</small><b>{n_dup}</b></div>'
             f'<div class="fs-kpi"><small>오래된 설치 파일</small><b>{n_old}</b></div>'
             '</div>', unsafe_allow_html=True)
-        if plan["llm_source"] == "fallback":
-            note("Gemini 호출이 일부 실패해서 그 파일들은 <b>규칙 기반</b>으로 분석했습니다. (표의 '분석' 열 참고)", "warn")
 
         before_t = tree_from_paths([i["src_rel"] for i in items])
         after_t = tree_from_paths([f"{i['dest_dir']}/{i['new_name']}" if i["include"] else i["src_rel"] for i in items])
@@ -489,43 +506,31 @@ with tab_clean:
             + panel("정리 후 (미리보기)", f"폴더 {n_dirs}개", render_tree(after_t, "정리 폴더", files=False))
             + "</div>", unsafe_allow_html=True)
 
-        st.markdown('<div class="fs-sec">제안 확인·수정</div>', unsafe_allow_html=True)
-        st.caption("새 이름과 옮길 폴더는 칸을 눌러 바로 고칠 수 있습니다. 옮기지 않을 파일은 '포함'을 끄세요.")
+        st.markdown('<div class="fs-sec">정리안 확인·수정</div>', unsafe_allow_html=True)
+        st.caption("칸을 눌러 새 이름과 넣을 폴더를 바꿀 수 있어요. 옮기고 싶지 않은 파일은 '포함' 체크를 빼세요.")
         df = pd.DataFrame([{
-            "포함": i["include"], "새 이름": i["new_name"], "원래 이름": i["src_rel"], "옮길 폴더": i["dest_dir"],
-            "분류": i["category"], "분석": SOURCE_LABEL.get(i["source"], i["source"]), "요약": i["summary"],
+            "포함": i["include"], "새 이름": i["new_name"], "원래 이름": i["src_rel"], "넣을 폴더": i["dest_dir"],
+            "분류": i["category"], "요약": plain_summary(i["summary"]),
             "알림": item_note(i), "id": i["id"],
         } for i in items])
         edited = st.data_editor(
             df, hide_index=True, use_container_width=True, height=min(560, 38 + 35 * len(df)),
-            disabled=["원래 이름", "분류", "요약", "알림", "분석", "id"],
-            column_order=["포함", "새 이름", "원래 이름", "옮길 폴더", "분류", "분석", "요약", "알림"],
+            disabled=["원래 이름", "분류", "요약", "알림", "id"],
+            column_order=["포함", "새 이름", "원래 이름", "넣을 폴더", "분류", "요약", "알림"],
             column_config={
                 "포함": st.column_config.CheckboxColumn(width="small"),
                 "새 이름": st.column_config.TextColumn(width="large"),
                 "원래 이름": st.column_config.TextColumn(width="medium"),
-                "옮길 폴더": st.column_config.TextColumn(width="medium"),
+                "넣을 폴더": st.column_config.TextColumn(width="medium"),
                 "분류": st.column_config.TextColumn(width="small"),
-                "분석": st.column_config.TextColumn(width="small"),
                 "요약": st.column_config.TextColumn(width="large"),
                 "알림": st.column_config.TextColumn(width="medium"),
             }, key=f"editor-{plan['id']}")
 
-        with st.expander("이 정리를 리눅스 명령어로 보기"):
-            st.caption("서비스가 하는 일은 결국 `mkdir -p`(폴더 만들기)와 `mv -n`(옮기며 이름 바꾸기, 덮어쓰지 않음)입니다. "
-                       "지우는 명령은 없습니다. 내려받아 정리 폴더에서 `bash plan.sh`로 직접 실행해도 같은 결과가 나옵니다. "
-                       "(표에서 고친 내용은 '정리하기'를 누를 때 반영되므로, 아래는 AI 제안 기준입니다.)")
-            script = api("GET", f"/api/v1/plans/{plan['id']}/script")
-            if isinstance(script, (bytes, bytearray)):
-                text = script.decode("utf-8")
-                st.code(text, language="bash")
-                st.download_button("셸 스크립트 내려받기", data=text.encode("utf-8"),
-                                   file_name=f"plan-{plan['id']}.sh", mime="text/x-shellscript")
-
         count = int(edited["포함"].sum())
         with st.container(key="actionbar"):
             c0, c1, c2, c3 = st.columns([5, 1.4, 1, 1.6], vertical_alignment="center")
-            c0.markdown(f'<div class="fs-barnote">선택한 <b>{count}개</b> 파일을 정리합니다 · 언제든 되돌릴 수 있어요</div>',
+            c0.markdown(f'<div class="fs-barnote">선택한 <b>{count}개</b> 파일을 정리해요 · 언제든 되돌릴 수 있어요</div>',
                         unsafe_allow_html=True)
             rescan = c1.button("다시 살펴보기", use_container_width=True)
             cancel = c2.button("취소", use_container_width=True)
@@ -537,8 +542,8 @@ with tab_clean:
                 patch = {}
                 if row["새 이름"] != old["new_name"]:
                     patch["new_name"] = row["새 이름"]
-                if row["옮길 폴더"] != old["dest_dir"]:
-                    patch["dest_dir"] = row["옮길 폴더"]
+                if row["넣을 폴더"] != old["dest_dir"]:
+                    patch["dest_dir"] = row["넣을 폴더"]
                 if bool(row["포함"]) != old["include"]:
                     patch["include"] = bool(row["포함"])
                 if patch:
@@ -578,7 +583,7 @@ def file_icon(path: str) -> str:
 with tab_find:
     _, mid, _ = st.columns([1, 6, 1])
     with mid:
-        heading("무엇을 찾을까요?", "말로 물어보세요. 제목이 아니라 <b>내용</b>으로 찾아 드립니다.")
+        heading("무엇을 찾을까요?", "말하듯 적어 보세요. 파일 이름이 아니라 <b>내용</b>으로 찾아 드려요.")
         with st.container(key="searchbox"):
             with st.form("search-form", border=False):
                 c1, c2 = st.columns([6, 1], vertical_alignment="center")
@@ -598,9 +603,9 @@ with tab_find:
                 secs = st.session_state.get("search_secs", 0)
                 st.markdown(
                     f'<div class="fs-answer"><div class="ai">AI</div><div><div class="a">{esc(res["answer"])}</div>'
-                    f'<div class="meta"><span class="fs-chip src">{SOURCE_LABEL.get(res["source"], res["source"])}</span>'
+                    f'<div class="meta">'
                     f'결과 {len(res["results"])}개 · {secs:.1f}초</div></div></div>', unsafe_allow_html=True)
-                for n, hit in enumerate(res["results"]):
+                for hit in res["results"]:
                     f = hit["file"]
                     chips = f'<span class="fs-chip">{esc(f["category"])}</span>'
                     if f["course"]:
@@ -608,39 +613,34 @@ with tab_find:
                     if f["date"]:
                         chips += f'<span class="fs-chip g">{esc(f["date"])}</span>'
                     if f["sensitive"]:
-                        chips += '<span class="fs-chip lock">민감 · AI 미사용</span>'
-                    card, btn = st.columns([6, 1], vertical_alignment="center")
-                    card.markdown(
+                        chips += '<span class="fs-chip lock">개인 서류 · AI에 안 보여 줌</span>'
+                    st.markdown(
                         f'<div class="fs-res"><div class="fs-ico">{file_icon(f["path_rel"])}</div><div>'
-                        f'<div class="t">{esc(f["title"] or f["original_name"])}</div>'
-                        f'<div class="p">{esc(f["path_rel"])}</div>{chips}'
-                        f'<div class="s">{esc(f["summary"])}</div>'
+                        f'<a class="t" href="{esc(file_link(f["id"]))}" target="_blank" rel="noopener" '
+                        f'title="눌러서 파일 열기">{esc(f["title"] or f["original_name"])}</a>'
+                        f'<div class="p">{esc(f["path_rel"])} · {human(f["size"])}</div>{chips}'
+                        f'<div class="s">{esc(plain_summary(f["summary"]))}</div>'
                         f'<div class="r">→ {esc(hit["reason"])}</div></div></div>', unsafe_allow_html=True)
-                    if n < 5 and f["size"] <= 20 * 1024 * 1024:
-                        data = api("GET", f"/api/v1/files/{f['id']}/content")
-                        if isinstance(data, bytes):
-                            btn.download_button(f"열기 · {human(f['size'])}", data=data, use_container_width=True,
-                                                file_name=f["path_rel"].rsplit("/", 1)[-1], key=f"dl-{f['id']}")
 
 
 # ---------------------------------------------------------------------------
 # 3. 정리 기록
 # ---------------------------------------------------------------------------
 with tab_log:
-    heading("정리 기록", "언제 무엇을 옮겼는지 남아 있고, 어느 기록이든 되돌릴 수 있습니다.")
+    heading("정리 기록", "언제 어떤 파일을 옮겼는지 모두 남아 있어요. 어느 기록이든 되돌릴 수 있어요.")
     batches = api("GET", "/api/v1/batches") or []
     if not batches:
-        note("아직 정리한 기록이 없습니다.")
+        note("아직 정리한 기록이 없어요.")
     for b in batches:
-        state = f"되돌림 ({kst(b['undone_at'])})" if b["undone_at"] else "적용됨"
+        state = f"되돌림 ({kst(b['undone_at'])})" if b["undone_at"] else "정리됨"
         with st.expander(f"#{b['id']}  ·  {kst(b['created_at'])}  ·  {b['moved']}개 정리  ·  {state}"):
             st.dataframe(pd.DataFrame([{"원래 위치": m["src_rel"], "정리된 위치": m["dst_rel"],
-                                        "상태": m["status"], "메모": m["error"] or ""} for m in b["moves"]]),
+                                        "상태": STATUS_LABEL.get(m["status"], m["status"]), "메모": m["error"] or ""} for m in b["moves"]]),
                          hide_index=True, use_container_width=True)
             if not b["undone_at"] and st.button("이 정리 되돌리기", key=f"undo-{b['id']}"):
                 if api("POST", f"/api/v1/batches/{b['id']}/undo") is not None:
                     st.session_state.pop("batch", None)
-                    st.toast("되돌렸습니다.")
+                    st.toast("되돌렸어요.")
                     st.rerun()
 
 
@@ -648,22 +648,22 @@ with tab_log:
 # 4. 설정
 # ---------------------------------------------------------------------------
 with tab_cfg:
-    heading("설정", "다음 '폴더 살펴보기'부터 적용됩니다.")
+    heading("설정", "바꾼 내용은 다음에 '폴더 살펴보기'를 누를 때부터 적용돼요.")
     left, right = st.columns([3, 2], gap="large")
     with left:
         with st.form("settings-form"):
             st.markdown('<div class="fs-sec">내 과목 목록</div>', unsafe_allow_html=True)
             courses = st.text_area(
-                "한 줄에 한 과목. 별칭은 콜론 뒤에 쉼표로 (예: 기계학습: 머신러닝, ML)",
+                "한 줄에 한 과목씩 적어 주세요. 다르게 부르는 이름은 콜론 뒤에 쉼표로 (예: 기계학습: 머신러닝, ML)",
                 value="\n".join(cfg.get("courses", [])), height=150)
             st.markdown('<div class="fs-sec">새 이름 규칙</div>', unsafe_allow_html=True)
             keys = list(PATTERNS)
             pattern = st.radio("이름 규칙", keys, index=keys.index(cfg.get("name_pattern", keys[0])),
                                format_func=PATTERNS.get, label_visibility="collapsed")
             st.markdown('<div class="fs-sec">개인정보</div>', unsafe_allow_html=True)
-            analyze_images = st.toggle("이미지 내용을 AI로 분석하기", value=cfg.get("analyze_images", True),
-                                       help="끄면 이미지는 파일 이름과 내 컴퓨터 OCR로만 분류합니다.")
-            extra = st.text_area("민감 파일로 볼 단어 추가 (한 줄에 하나)",
+            analyze_images = st.toggle("사진 내용도 AI에게 보여 주기", value=cfg.get("analyze_images", True),
+                                       help="끄면 사진은 파일 이름과 내 컴퓨터 안에서 읽은 글자로만 분류해요.")
+            extra = st.text_area("이 단어가 들어간 파일은 AI에게 보여 주지 않기 (한 줄에 하나)",
                                  value="\n".join(cfg.get("extra_sensitive_keywords", [])), height=80,
                                  placeholder="예: 성적증명서")
             if st.form_submit_button("저장", type="primary"):
@@ -671,31 +671,32 @@ with tab_cfg:
                         "analyze_images": analyze_images,
                         "extra_sensitive_keywords": [k for k in extra.splitlines() if k.strip()]}
                 if api("PUT", "/api/v1/settings", json=body) is not None:
-                    st.toast("저장했습니다. 다음 '폴더 살펴보기'부터 적용됩니다.")
+                    st.toast("저장했어요. 다음 '폴더 살펴보기'부터 적용돼요.")
                     st.rerun()
     with right:
+        dev_status()
         with st.container(border=True, key="card-3"):
             st.markdown('<div class="fs-sec">정리 폴더</div>', unsafe_allow_html=True)
             st.code(cfg.get("target_dir", "?"), language=None)
-            st.caption("바꾸려면 `.env`의 `HOST_TARGET_DIR`를 고친 뒤 `docker compose up -d`로 다시 시작하세요. "
+            st.caption("다른 폴더를 정리하려면 설정 파일(`.env`)의 `HOST_TARGET_DIR`를 고친 뒤 `docker compose up -d`로 다시 시작해 주세요. "
                        "(Windows 예: `HOST_TARGET_DIR=C:/Users/내아이디/Downloads`)")
         if cfg.get("demo_reset_available"):
             with st.container(border=True, key="card-4"):
-                st.markdown('<div class="fs-sec">발표 리허설</div>', unsafe_allow_html=True)
-                st.caption("연습 폴더를 '정리 전' 상태로 되돌립니다.")
+                st.markdown('<div class="fs-sec">연습 폴더</div>', unsafe_allow_html=True)
+                st.caption("연습용 파일을 처음 상태로 되돌려요.")
                 if st.button("연습 폴더 초기화", use_container_width=True):
                     res = api("POST", "/api/v1/demo/reset", timeout=120)
                     if res is not None:
                         for key in ("plan", "batch", "search"):
                             st.session_state.pop(key, None)
-                        st.toast(f"샘플 파일 {res.get('copied', 0)}개를 다시 넣었습니다.")
+                        st.toast(f"연습용 파일 {res.get('copied', 0)}개를 다시 넣었어요.")
                         st.rerun()
         with st.container(border=True, key="card-5"):
             st.markdown('<div class="fs-sec">KNIME 실습용 데이터</div>', unsafe_allow_html=True)
-            st.caption("파일마다 이름 특징·규칙 분류·Gemini 분류(미리 저장된 것)·정답(연습 폴더)을 CSV로 내려받습니다. "
-                       "Gemini를 새로 부르지 않습니다. 사용법은 `knime/README.md`를 보세요.")
+            st.caption("파일 정보와 분류 결과를 표(CSV)로 내려받아요. KNIME 실습에 쓸 수 있고, AI를 새로 부르지 않아요. "
+                       "사용법은 `knime/README.md`에 있어요.")
             if st.button("CSV 만들기", use_container_width=True):
-                with st.spinner("파일을 읽는 중… (이미지 글자 인식 때문에 수십 초 걸릴 수 있어요)"):
+                with st.spinner("파일을 읽는 중이에요… 사진이 많으면 조금 걸려요."):
                     data = api("GET", "/api/v1/export/knime.csv", timeout=300)
                 if isinstance(data, (bytes, bytearray)):
                     st.session_state["knime_csv"] = bytes(data)

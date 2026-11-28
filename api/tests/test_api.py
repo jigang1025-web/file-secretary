@@ -79,3 +79,29 @@ def test_demo_reset_protects_real_folder(client, app_env):
     assert client.post("/api/v1/demo/reset").status_code == 409
     assert (app_env / "내 소중한 파일.docx").exists()
     assert client.get("/api/v1/settings").json()["demo_reset_available"] is False
+
+
+def test_open_file_with_signed_link(client, app_env):
+    import time
+
+    from app.main import app
+    from app.security import file_link_signature
+
+    client.post("/api/v1/demo/reset")
+    client.post("/api/v1/plans", json={})
+    rec = next(f for f in client.get("/api/v1/files").json() if f["path_rel"].endswith(".txt"))
+    bare = TestClient(app)  # 브라우저처럼 X-API-Key 헤더 없이
+    exp = int(time.time()) + 600
+    ok = bare.get(f"/api/v1/files/{rec['id']}/open", params={"exp": exp, "sig": file_link_signature(rec["id"], exp)})
+    assert ok.status_code == 200
+    assert ok.headers["content-disposition"].startswith("inline")
+    assert "charset=" in ok.headers["content-type"]
+    charset = ok.headers["content-type"].split("charset=")[1]
+    assert "STUDY" in ok.content.decode("cp949" if charset == "euc-kr" else charset)
+    wrong = bare.get(f"/api/v1/files/{rec['id']}/open", params={"exp": exp, "sig": "0" * 64})
+    assert wrong.status_code == 403
+    other = bare.get(f"/api/v1/files/{rec['id'] + 1}/open", params={"exp": exp, "sig": file_link_signature(rec["id"], exp)})
+    assert other.status_code == 403
+    old = int(time.time()) - 10
+    expired = bare.get(f"/api/v1/files/{rec['id']}/open", params={"exp": old, "sig": file_link_signature(rec["id"], old)})
+    assert expired.status_code == 403
