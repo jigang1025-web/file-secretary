@@ -28,7 +28,6 @@ PATTERNS = {
     "title_date": "제목_날짜  (기말 프로젝트 안내_2026-11-09.pdf)",
     "title_only": "제목만  (기말 프로젝트 안내.pdf)",
 }
-SOURCE_LABEL = {"gemini": "AI", "mock": "기본 규칙", "fallback": "기본 규칙(대체)", "rule": "AI 안 씀"}
 STATUS_LABEL = {"moved": "옮김", "skipped": "건너뜀", "undone": "되돌림", "undo_failed": "되돌리기 실패"}
 EXT_LABEL = {"pdf": "PDF", "jpg": "IMG", "jpeg": "IMG", "png": "IMG", "gif": "IMG", "webp": "IMG", "heic": "IMG",
              "doc": "DOC", "docx": "DOC", "hwp": "HWP", "hwpx": "HWP", "txt": "TXT", "md": "TXT",
@@ -254,6 +253,11 @@ def file_link(file_id: int) -> str:
     return f"{PUBLIC_API_URL}/api/v1/files/{file_id}/open?exp={exp}&sig={sig}"
 
 
+def plain_summary(text: str) -> str:
+    """서버가 붙이는 개발용 표시('(규칙 기반)')는 사용자 화면에서 뺀다."""
+    return (text or "").replace("(규칙 기반) ", "").replace("(규칙 기반)", "").strip()
+
+
 def esc(s) -> str:
     return html.escape(str(s or ""))
 
@@ -390,7 +394,7 @@ def item_note(it: dict) -> str:
     if it["sensitive"]:
         notes.append(f"AI에 안 보여 줌 ({it['sensitive_reason']})")
     notes += it["flags"]
-    if it.get("error"):
+    if it.get("error") and it.get("source") != "fallback":  # AI 대신 규칙으로 분류한 사유는 개발용 정보라 숨김
         notes.append(f"문제: {it['error']}")
     return " · ".join(notes)
 
@@ -491,8 +495,6 @@ with tab_clean:
             f'<div class="fs-kpi"><small>똑같은 파일</small><b>{n_dup}</b></div>'
             f'<div class="fs-kpi"><small>오래된 설치 파일</small><b>{n_old}</b></div>'
             '</div>', unsafe_allow_html=True)
-        if plan["llm_source"] == "fallback":
-            note("AI 연결이 잠깐 불안정해서 일부 파일은 <b>기본 규칙</b>으로 분류했어요. (표의 '분류 방법' 칸 참고)", "warn")
 
         before_t = tree_from_paths([i["src_rel"] for i in items])
         after_t = tree_from_paths([f"{i['dest_dir']}/{i['new_name']}" if i["include"] else i["src_rel"] for i in items])
@@ -508,20 +510,19 @@ with tab_clean:
         st.caption("칸을 눌러 새 이름과 넣을 폴더를 바꿀 수 있어요. 옮기고 싶지 않은 파일은 '포함' 체크를 빼세요.")
         df = pd.DataFrame([{
             "포함": i["include"], "새 이름": i["new_name"], "원래 이름": i["src_rel"], "넣을 폴더": i["dest_dir"],
-            "분류": i["category"], "분류 방법": SOURCE_LABEL.get(i["source"], i["source"]), "요약": i["summary"],
+            "분류": i["category"], "요약": plain_summary(i["summary"]),
             "알림": item_note(i), "id": i["id"],
         } for i in items])
         edited = st.data_editor(
             df, hide_index=True, use_container_width=True, height=min(560, 38 + 35 * len(df)),
-            disabled=["원래 이름", "분류", "요약", "알림", "분류 방법", "id"],
-            column_order=["포함", "새 이름", "원래 이름", "넣을 폴더", "분류", "분류 방법", "요약", "알림"],
+            disabled=["원래 이름", "분류", "요약", "알림", "id"],
+            column_order=["포함", "새 이름", "원래 이름", "넣을 폴더", "분류", "요약", "알림"],
             column_config={
                 "포함": st.column_config.CheckboxColumn(width="small"),
                 "새 이름": st.column_config.TextColumn(width="large"),
                 "원래 이름": st.column_config.TextColumn(width="medium"),
                 "넣을 폴더": st.column_config.TextColumn(width="medium"),
                 "분류": st.column_config.TextColumn(width="small"),
-                "분류 방법": st.column_config.TextColumn(width="small"),
                 "요약": st.column_config.TextColumn(width="large"),
                 "알림": st.column_config.TextColumn(width="medium"),
             }, key=f"editor-{plan['id']}")
@@ -602,7 +603,7 @@ with tab_find:
                 secs = st.session_state.get("search_secs", 0)
                 st.markdown(
                     f'<div class="fs-answer"><div class="ai">AI</div><div><div class="a">{esc(res["answer"])}</div>'
-                    f'<div class="meta"><span class="fs-chip src">{SOURCE_LABEL.get(res["source"], res["source"])}</span>'
+                    f'<div class="meta">'
                     f'결과 {len(res["results"])}개 · {secs:.1f}초</div></div></div>', unsafe_allow_html=True)
                 for hit in res["results"]:
                     f = hit["file"]
@@ -618,7 +619,7 @@ with tab_find:
                         f'<a class="t" href="{esc(file_link(f["id"]))}" target="_blank" rel="noopener" '
                         f'title="눌러서 파일 열기">{esc(f["title"] or f["original_name"])}</a>'
                         f'<div class="p">{esc(f["path_rel"])} · {human(f["size"])}</div>{chips}'
-                        f'<div class="s">{esc(f["summary"])}</div>'
+                        f'<div class="s">{esc(plain_summary(f["summary"]))}</div>'
                         f'<div class="r">→ {esc(hit["reason"])}</div></div></div>', unsafe_allow_html=True)
 
 
