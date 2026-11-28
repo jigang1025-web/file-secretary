@@ -108,6 +108,7 @@ def _write_status(state: str, loose: int, ready: int, failed: int, message: str)
         with db.SessionLocal() as session:
             row = session.get(WatcherStatus, 1) or WatcherStatus(id=1)
             row.state, row.loose, row.ready, row.failed, row.message = state, loose, ready, failed, message
+            row.updated_at = db.utcnow()
             session.merge(row)
             session.commit()
     except Exception as exc:  # noqa: BLE001 — 상태 기록 실패가 감시를 멈추게 하지 않도록
