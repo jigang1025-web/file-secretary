@@ -72,7 +72,7 @@ docker compose ps                            # 4개 컨테이너(db·api·watche
 | http://localhost:8501 | 대시보드 |
 | http://localhost:8000/docs | 자동 생성 API 문서 (Swagger) |
 
-- 처음에는 **연습 폴더**(`demo/inbox`)가 연결됩니다. 사이드바의 **🔁 연습 폴더 초기화**를 누르면 지저분한 샘플 파일 26개가 들어갑니다.
+- 처음에는 **연습 폴더**(`demo/inbox`)가 연결됩니다. **설정** 탭의 **연습 폴더 초기화**를 누르면 지저분한 샘플 파일 26개가 들어갑니다.
 - Gemini 키가 없으면 **규칙 기반**(파일 이름·글자·OCR 단서)으로 전체 흐름이 동작합니다. 키를 넣으면 AI가 내용을 이해해 훨씬 자연스러운 이름을 짓습니다.
 - Gemini 키 발급: [Google AI Studio](https://aistudio.google.com/) → API 키 만들기 → `.env`의 `GEMINI_API_KEY=`에 붙여 넣고 `docker compose up -d`.
 

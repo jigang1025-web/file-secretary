@@ -3,7 +3,7 @@
 ## 준비 (발표 전날·당일)
 
 - [ ] `.env`에 Gemini 키, `docker compose up -d` 후 `docker compose ps`가 모두 healthy
-- [ ] 사이드바 **🔁 연습 폴더 초기화** (또는 `./scripts/reset_demo.sh`)
+- [ ] **설정** 탭의 **연습 폴더 초기화** (또는 `./scripts/reset_demo.sh`)
 - [ ] (추천) 내 진짜 학교 HWP 파일 1개를 `demo/inbox`에 넣어 두기 — "실제 한글 파일도 읽는다"
 - [ ] 강의실 인터넷이 느릴 때를 대비해 **시연 녹화본** 준비 (Gemini 응답 시간은 네트워크에 따라 다름)
 - [ ] 브라우저 탭: 대시보드(8501), API 문서(8000/docs), GitHub 저장소
