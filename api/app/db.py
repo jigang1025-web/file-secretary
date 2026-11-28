@@ -40,7 +40,7 @@ class AppSettings(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     courses: Mapped[list] = mapped_column(JSON, default=list)
-    name_pattern: Mapped[str] = mapped_column(String(32), default="date_course_title")
+    name_pattern: Mapped[str] = mapped_column(String(32), default="date_title")
     analyze_images: Mapped[bool] = mapped_column(Boolean, default=True)
     extra_sensitive_keywords: Mapped[list] = mapped_column(JSON, default=list)
     keep_good_names: Mapped[bool] = mapped_column(Boolean, default=True)  # 이미 알아보기 쉬운 이름은 그대로
@@ -211,7 +211,7 @@ def get_session() -> Iterator[Session]:
 def get_app_settings(session: Session) -> AppSettings:
     row = session.get(AppSettings, 1)
     if row is None:
-        row = AppSettings(id=1, courses=list(DEFAULT_COURSES), name_pattern="date_course_title",
+        row = AppSettings(id=1, courses=list(DEFAULT_COURSES), name_pattern="date_title",
                           analyze_images=True, extra_sensitive_keywords=[], keep_good_names=True)
         session.add(row)
         session.commit()

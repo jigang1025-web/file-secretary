@@ -80,7 +80,7 @@ def _settings_out(session: Session) -> SettingsOut:
     cfg = get_app_settings(session)
     root = settings.target_dir.resolve()
     return SettingsOut(
-        courses=cfg.courses or [], name_pattern=cfg.name_pattern, analyze_images=cfg.analyze_images,
+        courses=cfg.courses or [], name_pattern=planner.normalize_pattern(cfg.name_pattern), analyze_images=cfg.analyze_images,
         extra_sensitive_keywords=cfg.extra_sensitive_keywords or [],
         keep_good_names=cfg.keep_good_names if cfg.keep_good_names is not None else True, target_dir=str(root),
         llm_mode=settings.effective_llm_mode, gemini_model=settings.gemini_model,

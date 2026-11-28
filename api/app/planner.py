@@ -37,12 +37,17 @@ SKIP_NAMES = {"desktop.ini", "thumbs.db", ".ds_store", MARKER}
 PARTIAL_EXT = {".crdownload", ".part", ".partial", ".download", ".tmp", ".opdownload"}
 DUPLICATE_DIR = "중복 파일"
 
-NAME_PATTERNS = {
-    "date_course_title": ["date", "course", "title"],
-    "course_title_date": ["course", "title", "date"],
+NAME_PATTERNS = {             # 새 이름 규칙: 날짜와 제목만 쓴다 (과목은 폴더 이름으로 충분)
+    "date_title": ["date", "title"],
     "title_date": ["title", "date"],
     "title_only": ["title"],
 }
+LEGACY_PATTERNS = {"date_course_title": "date_title", "course_title_date": "title_date"}  # 예전 설정값
+
+
+def normalize_pattern(pattern: str | None) -> str:
+    pattern = LEGACY_PATTERNS.get(pattern or "", pattern or "")
+    return pattern if pattern in NAME_PATTERNS else "date_title"
 
 WINDOWS_RESERVED = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)),
                     *(f"lpt{i}" for i in range(1, 10))}
@@ -91,7 +96,7 @@ def strip_course(title: str, course: str) -> str:
 def build_name(pattern: str, date_str: str, course: str, title: str, ext: str) -> str:
     title = sanitize_component(strip_course(title, course), 60) or "파일"
     values = {"date": date_str, "course": sanitize_component(course, 30), "title": title}
-    segments = [values[k] for k in NAME_PATTERNS.get(pattern, NAME_PATTERNS["date_course_title"]) if values[k]]
+    segments = [values[k] for k in NAME_PATTERNS[normalize_pattern(pattern)] if values[k]]
     stem = "_".join(segments)[:120].strip(" ._")
     return f"{stem}{ext.lower()}"
 

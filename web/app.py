@@ -23,8 +23,7 @@ API_KEY = os.getenv("SECRETARY_API_KEY", "")
 KST = ZoneInfo("Asia/Seoul")
 
 PATTERNS = {
-    "date_course_title": "날짜_과목_제목  (2026-11-09_오픈소스프로그래밍_기말 프로젝트 안내.pdf)",
-    "course_title_date": "과목_제목_날짜  (오픈소스프로그래밍_기말 프로젝트 안내_2026-11-09.pdf)",
+    "date_title": "날짜_제목  (2026-11-09_기말 프로젝트 안내.pdf)",
     "title_date": "제목_날짜  (기말 프로젝트 안내_2026-11-09.pdf)",
     "title_only": "제목만  (기말 프로젝트 안내.pdf)",
 }
@@ -652,13 +651,9 @@ with tab_cfg:
     left, right = st.columns([3, 2], gap="large")
     with left:
         with st.form("settings-form"):
-            st.markdown('<div class="fs-sec">내 과목 목록</div>', unsafe_allow_html=True)
-            courses = st.text_area(
-                "한 줄에 한 과목씩 적어 주세요. 다르게 부르는 이름은 콜론 뒤에 쉼표로 (예: 기계학습: 머신러닝, ML)",
-                value="\n".join(cfg.get("courses", [])), height=150)
             st.markdown('<div class="fs-sec">새 이름 규칙</div>', unsafe_allow_html=True)
             keys = list(PATTERNS)
-            pattern = st.radio("이름 규칙", keys, index=keys.index(cfg.get("name_pattern", keys[0])),
+            pattern = st.radio("이름 규칙", keys, index=keys.index(cfg.get("name_pattern", keys[0])) if cfg.get("name_pattern") in keys else 0,
                                format_func=PATTERNS.get, label_visibility="collapsed")
             keep_good = st.toggle("이미 알아보기 쉬운 이름은 그대로 두기", value=cfg.get("keep_good_names", True),
                                   help="'한국근현대사 연표 양식'처럼 이름만 봐도 알 수 있는 파일은 이름을 바꾸지 않고 폴더만 옮겨요.")
@@ -669,7 +664,7 @@ with tab_cfg:
                                  value="\n".join(cfg.get("extra_sensitive_keywords", [])), height=80,
                                  placeholder="예: 성적증명서")
             if st.form_submit_button("저장", type="primary"):
-                body = {"courses": [c for c in courses.splitlines() if c.strip()], "name_pattern": pattern,
+                body = {"courses": cfg.get("courses", []), "name_pattern": pattern,
                         "analyze_images": analyze_images, "keep_good_names": keep_good,
                         "extra_sensitive_keywords": [k for k in extra.splitlines() if k.strip()]}
                 if api("PUT", "/api/v1/settings", json=body) is not None:
