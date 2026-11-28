@@ -660,6 +660,8 @@ with tab_cfg:
             keys = list(PATTERNS)
             pattern = st.radio("이름 규칙", keys, index=keys.index(cfg.get("name_pattern", keys[0])),
                                format_func=PATTERNS.get, label_visibility="collapsed")
+            keep_good = st.toggle("이미 알아보기 쉬운 이름은 그대로 두기", value=cfg.get("keep_good_names", True),
+                                  help="'한국근현대사 연표 양식'처럼 이름만 봐도 알 수 있는 파일은 이름을 바꾸지 않고 폴더만 옮겨요.")
             st.markdown('<div class="fs-sec">개인정보</div>', unsafe_allow_html=True)
             analyze_images = st.toggle("사진 내용도 AI에게 보여 주기", value=cfg.get("analyze_images", True),
                                        help="끄면 사진은 파일 이름과 내 컴퓨터 안에서 읽은 글자로만 분류해요.")
@@ -668,7 +670,7 @@ with tab_cfg:
                                  placeholder="예: 성적증명서")
             if st.form_submit_button("저장", type="primary"):
                 body = {"courses": [c for c in courses.splitlines() if c.strip()], "name_pattern": pattern,
-                        "analyze_images": analyze_images,
+                        "analyze_images": analyze_images, "keep_good_names": keep_good,
                         "extra_sensitive_keywords": [k for k in extra.splitlines() if k.strip()]}
                 if api("PUT", "/api/v1/settings", json=body) is not None:
                     st.toast("저장했어요. 다음 '폴더 살펴보기'부터 적용돼요.")

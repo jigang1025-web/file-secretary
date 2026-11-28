@@ -97,3 +97,34 @@ def test_mtime_used_when_no_other_date(session, app_env):
     os.utime(p, (t, t))
     plan = planner.build_plan(session, app_env, get_app_settings(session))
     assert plan.items[0].new_name.startswith("2026-03-02_")
+
+
+def test_name_is_meaningful():
+    from app.analyzer import name_is_meaningful
+
+    assert name_is_meaningful("한국근현대사 연표 양식.hwp")
+    assert name_is_meaningful("1 2026학년도 2학기 부·복수전공 신청 안내.pdf")
+    assert not name_is_meaningful("KakaoTalk_20261103_153201234.jpg")
+    assert not name_is_meaningful("다운로드 (7).pdf")
+    assert not name_is_meaningful("강의자료_week10.pdf")
+    assert not name_is_meaningful("final_진짜최종(2).docx")
+
+
+def test_keep_good_names_setting(session, app_env):
+    good = app_env / "한국근현대사 연표 양식.txt"
+    good.write_text("한국 근현대사 주요 사건 연표를 정리하는 양식입니다.", encoding="utf-8")
+    vague = app_env / "새 텍스트 문서.txt"
+    vague.write_text("스터디카페 와이파이 비밀번호 메모", encoding="utf-8")
+    cfg = get_app_settings(session)
+
+    plan = planner.build_plan(session, app_env, cfg)
+    items = {i.src_rel: i for i in plan.items}
+    assert items[good.name].new_name == good.name
+    assert "그대로 둠" in " ".join(items[good.name].flags)
+    assert items[vague.name].new_name != vague.name
+
+    cfg.keep_good_names = False
+    session.commit()
+    plan = planner.build_plan(session, app_env, cfg)
+    items = {i.src_rel: i for i in plan.items}
+    assert items[good.name].new_name != good.name

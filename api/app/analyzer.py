@@ -23,7 +23,7 @@ from .config import settings
 log = logging.getLogger(__name__)
 
 # 프롬프트·결과 형식을 바꾸면 올려서 저장된 분석 결과(analysis_cache)를 새로 받게 한다
-CACHE_VERSION = 1
+CACHE_VERSION = 2  # 2: name_ok(원래 이름이 이미 알아보기 쉬운지) 추가
 
 CATEGORIES = ["수업", "문서", "개인서류", "영수증·결제", "사진", "스크린샷", "영상·음성", "설치파일",
               "압축파일", "기타"]
@@ -57,6 +57,7 @@ class Insight:
     date: str = ""
     summary: str = ""
     keywords: list[str] = field(default_factory=list)
+    name_ok: bool = False          # 원래 파일 이름만 봐도 무슨 파일인지 알 수 있는가
     source: str = "mock"           # gemini | mock | fallback | rule
     error: str | None = None
 
@@ -148,6 +149,14 @@ def _title_from_name(name: str) -> str:
     return stem[:30] if len(re.sub(r"[\d\s]", "", stem)) >= 2 else ""
 
 
+def name_is_meaningful(name: str) -> bool:
+    """규칙 기반 판단: 자동으로 붙은 이름이 아니고, 한글이 충분히(6자 이상) 들어 있으면 알아보기 쉬운 이름으로 본다."""
+    stem = name.rsplit(".", 1)[0]
+    if NOISE_NAME.search(stem):
+        return False
+    return len(re.findall(r"[가-힣]", stem)) >= 6
+
+
 def _summary_from_text(text: str) -> str:
     flat = re.sub(r"\s+", " ", text).strip()
     return (flat[:110] + "…") if len(flat) > 110 else flat
@@ -194,7 +203,7 @@ def mock_insight(inp: AnalysisInput, courses: dict[str, list[str]], source: str 
     summary = _summary_from_text(text) if text else f"(규칙 기반) {category} 파일입니다."
     keywords = [w for w in dict.fromkeys(re.findall(r"[가-힣A-Za-z0-9]{2,}", f"{course} {title}"))][:5]
     return Insight(category=category, course=course, title=title, date="", summary=summary,
-                   keywords=keywords, source=source, error=error)
+                   keywords=keywords, name_ok=name_is_meaningful(inp.name), source=source, error=error)
 
 
 def sensitive_insight(inp: AnalysisInput, reason_keyword: str = "") -> Insight:
@@ -216,6 +225,7 @@ class _FileInsight(BaseModel):
     date: str = ""
     summary: str = ""
     keywords: list[str] = Field(default_factory=list)
+    name_ok: bool = False
 
 
 class _BatchInsights(BaseModel):
@@ -240,8 +250,10 @@ INSIGHT_SCHEMA = {
                              "description": "YYYY-MM-DD date written in the content (issue/creation date), or empty"},
                     "summary": {"type": "string", "description": "Korean, 1-2 sentences"},
                     "keywords": {"type": "array", "items": {"type": "string"}, "maxItems": 6},
+                    "name_ok": {"type": "boolean",
+                                "description": "true if the ORIGINAL file name alone already tells clearly what the file is"},
                 },
-                "required": ["index", "category", "course", "title", "date", "summary", "keywords"],
+                "required": ["index", "category", "course", "title", "date", "summary", "keywords", "name_ok"],
             },
         }
     },
@@ -264,7 +276,11 @@ SYSTEM_PROMPT = """너는 대학생의 컴퓨터 파일을 정리해 주는 '파
 4. date는 내용에 적힌 대표 날짜(작성일·공지일·발행일)를 YYYY-MM-DD로. 없거나 확실하지 않으면 빈 문자열. 지어내지 않는다.
 5. summary는 한국어 1~2문장, keywords는 나중에 검색할 때 쓸 단어 3~6개.
 6. [MASKED]는 개인정보를 일부러 가린 것이다. 추측하지 않는다.
-7. 입력된 모든 파일(index)에 빠짐없이 답한다."""
+7. 입력된 모든 파일(index)에 빠짐없이 답한다.
+8. name_ok는 원래 파일 이름만 보고도 무슨 파일인지 구체적으로 알 수 있으면 true다.
+   예: '한국근현대사 연표 양식', '2026학년도 2학기 부·복수전공 신청 안내' → true
+   KakaoTalk_날짜, Screenshot, IMG_번호, 다운로드 (7), scan0001, 제목 없음, 새 문서, final_진짜최종(2),
+   '강의자료_week10'처럼 자동으로 붙었거나 과목·내용을 알 수 없는 이름은 false다."""
 
 
 def _human_size(n: int) -> str:
@@ -431,7 +447,7 @@ def _gemini_batch(batch: list[AnalysisInput], courses: dict[str, list[str]],
         results[f.index] = Insight(
             category=category, course=course, title=clean_title(f.title), date=valid_date(f.date),
             summary=(f.summary or "").strip()[:300], keywords=[k.strip() for k in f.keywords if k.strip()][:6],
-            source="gemini")
+            name_ok=bool(f.name_ok), source="gemini")
     return results
 
 

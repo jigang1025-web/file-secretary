@@ -398,6 +398,9 @@ def build_plan(session: Session, root: Path, cfg: AppSettings, limit: int | None
             dest = dest_dir_for(ins.category, ins.course)
             if keep_original_name(w.kind, ins.source):
                 new_name = w.path.name
+            elif cfg.keep_good_names is not False and ins.name_ok and not w.sensitive:
+                new_name = w.path.name
+                w.flags = [*w.flags, "이름이 이미 알아보기 쉬워 그대로 둠"]
             else:
                 new_name = build_name(cfg.name_pattern, day, ins.course, ins.title, w.ext)
         new_name = unique_name(safe_join(root, dest), new_name, taken)
