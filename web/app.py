@@ -26,7 +26,8 @@ PATTERNS = {
     "title_date": "제목_날짜  (기말 프로젝트 안내_2026-11-09.pdf)",
     "title_only": "제목만  (기말 프로젝트 안내.pdf)",
 }
-SOURCE_LABEL = {"gemini": "Gemini", "mock": "규칙", "fallback": "규칙(대체)", "rule": "보호·중복"}
+SOURCE_LABEL = {"gemini": "AI", "mock": "기본 규칙", "fallback": "기본 규칙(대체)", "rule": "AI 안 씀"}
+STATUS_LABEL = {"moved": "옮김", "skipped": "건너뜀", "undone": "되돌림", "undo_failed": "되돌리기 실패"}
 EXT_LABEL = {"pdf": "PDF", "jpg": "IMG", "jpeg": "IMG", "png": "IMG", "gif": "IMG", "webp": "IMG", "heic": "IMG",
              "doc": "DOC", "docx": "DOC", "hwp": "HWP", "hwpx": "HWP", "txt": "TXT", "md": "TXT",
              "xls": "XLS", "xlsx": "XLS", "csv": "XLS", "ppt": "PPT", "pptx": "PPT",
@@ -196,14 +197,14 @@ def api(method: str, path: str, timeout: int = 60, **kwargs):
     try:
         r = requests.request(method, f"{API_URL}{path}", headers=headers, timeout=timeout, **kwargs)
     except requests.RequestException:
-        st.error(f"API 서버({API_URL})에 연결할 수 없습니다. 서버가 켜져 있는지 확인해 주세요.")
+        st.error(f"서비스에 연결할 수 없어요. Docker Desktop이 켜져 있는지 확인해 주세요. ({API_URL})")
         st.stop()
     if r.status_code >= 400:
         try:
             detail = r.json().get("detail", r.text)
         except ValueError:
             detail = r.text
-        st.error(f"요청 실패 ({r.status_code}): {detail}")
+        st.error(f"요청을 처리하지 못했어요 ({r.status_code}): {detail}")
         return None
     if r.status_code == 204 or not r.content:
         return {}
@@ -240,7 +241,7 @@ def note(text: str, kind: str = "") -> None:
 
 
 def steps(current: int) -> None:
-    labels = ["폴더 살펴보기", "제안 확인·수정", "정리 완료"]
+    labels = ["폴더 살펴보기", "정리안 확인", "정리 완료"]
     out = []
     for i, label in enumerate(labels, 1):
         cls, mark = ("done", "✓") if i < current else (("on", str(i)) if i == current else ("", str(i)))
@@ -324,15 +325,15 @@ def pill(text: str, dot: str = "", title: str = "") -> str:
 
 def watcher_pill(w: dict) -> str:
     if not w.get("running"):
-        return pill("폴더 감시 · 꺼짐", "off")
+        return pill("새 파일 자동 준비 · 꺼짐", "off")
     total, ready = w.get("loose", 0), w.get("ready", 0)
     if w.get("state") == "analyzing":
         if w.get("message", "").startswith("자주 쓰는 검색"):
-            return pill("폴더 감시 · 검색 미리 준비 중", "busy", w.get("message", ""))
-        return pill(f"폴더 감시 · 미리 읽는 중 {ready}/{total}", "busy", w.get("message", ""))
+            return pill("자주 찾는 질문 준비 중", "busy", w.get("message", ""))
+        return pill(f"새 파일 읽는 중 · {ready}/{total}", "busy", w.get("message", ""))
     if total:
-        return pill(f"폴더 감시 · {ready}/{total} 준비됨", "", w.get("message", ""))
-    return pill("폴더 감시 · 켜짐", "", w.get("message", ""))
+        return pill(f"파일 {total}개 준비 완료" if ready >= total else f"파일 준비 · {ready}/{total}", "", w.get("message", ""))
+    return pill("새 파일 기다리는 중", "", w.get("message", ""))
 
 
 LIVE_SECONDS = 4  # 상단 상태와 시작 화면을 몇 초마다 저절로 새로 고칠지
@@ -345,9 +346,9 @@ def top_bar() -> None:
     st.markdown(
         '<div class="fs-top"><div class="in"><div class="fs-brand"><div class="fs-logo">F</div>파일 정리 비서</div>'
         '<div class="fs-pills">'
-        + pill(f"Gemini · {cfg.get('gemini_model', '')}" if is_gemini else "AI 분석 · 규칙 기반", "" if is_gemini else "off")
+        + pill("AI 연결됨" if is_gemini else "AI 꺼짐 · 기본 규칙으로 분류", "" if is_gemini else "off", cfg.get("gemini_model", ""))
         + watcher_pill(w)
-        + pill("OCR " + ("켜짐" if cfg.get("ocr_enabled") else "꺼짐"), "" if cfg.get("ocr_enabled") else "off")
+        + pill("사진 속 글자 읽기 · " + ("켜짐" if cfg.get("ocr_enabled") else "꺼짐"), "" if cfg.get("ocr_enabled") else "off")
         + "</div></div></div>", unsafe_allow_html=True)
 
 
@@ -359,7 +360,7 @@ tab_clean, tab_find, tab_log, tab_cfg = st.tabs(["정리하기", "찾기", "정�
 # 1. 정리하기
 # ---------------------------------------------------------------------------
 def start_scan() -> None:
-    with st.spinner("AI가 파일 내용을 읽고 있습니다… (파일 수와 이미지 개수에 따라 수십 초 걸릴 수 있어요)"):
+    with st.spinner("AI가 파일을 읽고 있어요… 파일이 많으면 조금 걸릴 수 있어요."):
         plan = api("POST", "/api/v1/plans", json={}, timeout=900)
     if plan is not None:
         st.session_state["plan"] = plan
@@ -370,10 +371,10 @@ def start_scan() -> None:
 def item_note(it: dict) -> str:
     notes = []
     if it["sensitive"]:
-        notes.append(f"AI에 안 보냄 ({it['sensitive_reason']})")
+        notes.append(f"AI에 안 보여 줌 ({it['sensitive_reason']})")
     notes += it["flags"]
     if it.get("error"):
-        notes.append(f"오류: {it['error']}")
+        notes.append(f"문제: {it['error']}")
     return " · ".join(notes)
 
 
@@ -384,11 +385,11 @@ def start_view() -> None:
     live_stats = api("GET", "/api/v1/stats") or {}
     live_w = api("GET", "/api/v1/watcher") or {}
     loose = live_stats.get("loose_files", 0)
-    heading(f"정리 폴더에 흩어진 파일 {loose}개",
-            "AI가 파일 <b>내용</b>을 읽고 새 이름과 폴더를 제안합니다. 파일은 <b>확인을 누르기 전까지 옮기지 않습니다.</b>")
+    heading(f"정리가 필요한 파일이 {loose}개 있어요",
+            "AI가 파일을 열어 보고 알아보기 쉬운 이름과 폴더를 골라 드려요. <b>확인을 누르기 전에는 아무것도 옮기지 않아요.</b>")
     st.markdown(
         '<div class="fs-kpis">'
-        f'<div class="fs-kpi hl"><small>흩어진 파일</small><b>{loose}</b></div>'
+        f'<div class="fs-kpi hl"><small>정리할 파일</small><b>{loose}</b></div>'
         f'<div class="fs-kpi"><small>정리된 파일</small><b>{live_stats.get("organized_files", 0)}</b></div>'
         f'<div class="fs-kpi"><small>미리 읽어 둔 파일</small><b>{live_w.get("ready", 0)}</b></div>'
         '</div>', unsafe_allow_html=True)
@@ -399,16 +400,16 @@ def start_view() -> None:
             if live_w.get("running") and loose:
                 ready, total = live_w.get("ready", 0), live_w.get("loose", 0)
                 if total and ready >= total:
-                    note("폴더 감시 데몬이 새 파일을 <b>모두 미리 읽어 두었습니다.</b> 살펴보기가 바로 끝납니다.", "done")
+                    note("새로 들어온 파일을 <b>모두 미리 읽어 두었어요.</b> 지금 누르면 바로 끝나요.", "done")
                 else:
-                    note(f"폴더 감시 데몬이 새 파일을 미리 읽는 중입니다 (<b>{ready}/{total}</b>). "
-                         "끝난 뒤에 누르면 기다리지 않습니다. 진행 상황은 화면에 저절로 반영됩니다.", "acc")
-            st.write("Gemini가 문서·이미지 내용을 읽고 **이름 짓기 → 분류 → 폴더 제안**까지 한 번에 합니다. "
-                     "신분증·통장 같은 민감 파일은 AI에 보내지 않습니다.")
+                    note(f"새로 들어온 파일을 미리 읽고 있어요 (<b>{ready}/{total}</b>). "
+                         "다 끝난 뒤에 누르면 기다리지 않아도 돼요.", "acc")
+            st.write("누르면 AI가 문서와 사진 내용을 읽고 **새 이름 → 종류 → 넣을 폴더**를 한 번에 정해 드려요. "
+                     "신분증·통장 같은 개인 서류는 AI에게 보여 주지 않아요.")
             if st.button("폴더 살펴보기", type="primary", disabled=loose == 0, use_container_width=True):
                 start_scan()
             if loose == 0:
-                st.caption("정리할 파일이 없습니다. 설정 탭의 '연습 폴더 초기화'로 샘플을 넣어 보세요.")
+                st.caption("정리할 파일이 없어요. 설정 탭에서 '연습 폴더 초기화'를 누르면 연습용 파일이 들어와요.")
     with right:
         tree = api("GET", "/api/v1/tree", params={"depth": 1}) or {}
         st.markdown(panel("정리 전", f"{loose}개", render_tree(tree_from_api(tree), "정리 폴더", max_files=12)),
@@ -419,14 +420,14 @@ with tab_clean:
     plan = st.session_state.get("plan")
     batch = st.session_state.get("batch")
     if not is_gemini:
-        note("AI 분석이 <b>규칙 기반</b>입니다. <code>.env</code>에 <code>GEMINI_API_KEY</code>를 넣으면 AI가 파일 내용을 읽습니다.",
+        note("지금은 AI 없이 <b>기본 규칙</b>으로만 분류해요. AI를 쓰려면 설정 파일(<code>.env</code>)에 Gemini 키를 넣어 주세요.",
              "warn")
 
     if batch:  # ---- 3단계: 정리 직후 ----
         steps(3)
-        heading(f"파일 {batch['moved']}개를 정리했습니다",
-                "잘못 옮겨졌다면 <b>되돌리기</b> 한 번으로 원래 자리로 돌아갑니다."
-                + (f" (건너뜀 {batch['skipped']}개)" if batch["skipped"] else ""))
+        heading(f"파일 {batch['moved']}개를 정리했어요",
+                "잘못 옮겨졌다면 <b>되돌리기</b>를 누르세요. 모두 원래 자리로 돌아가요."
+                + (f" (옮기지 못한 파일 {batch['skipped']}개)" if batch["skipped"] else ""))
         skipped = [m for m in batch["moves"] if m["status"] == "skipped"]
         tree = api("GET", "/api/v1/tree", params={"depth": 3}) or {}
         left, right = st.columns([3, 2], gap="large")
@@ -437,18 +438,18 @@ with tab_clean:
         with right:
             with st.container(border=True, key="card-1"):
                 st.markdown('<div class="fs-sec">다음 할 일</div>', unsafe_allow_html=True)
-                note("<b>찾기</b> 탭에서 '기말 프로젝트 공지'처럼 말로 검색해 보세요.", "acc")
+                note("이제 <b>찾기</b> 탭에서 '기말 프로젝트 공지'처럼 말로 찾아보세요.", "acc")
                 if st.button("방금 정리 되돌리기", type="primary", use_container_width=True):
                     res = api("POST", f"/api/v1/batches/{batch['id']}/undo")
                     if res is not None:
                         st.session_state.pop("batch", None)
                         st.session_state.pop("plan", None)
-                        st.toast("원래대로 되돌렸습니다.")
+                        st.toast("원래대로 되돌렸어요.")
                         st.rerun()
                 if st.button("다시 살펴보기", use_container_width=True):
                     start_scan()
             if skipped:
-                with st.expander(f"건너뛴 파일 {len(skipped)}개"):
+                with st.expander(f"옮기지 못한 파일 {len(skipped)}개"):
                     for m in skipped:
                         st.write(f"- `{m['src_rel']}` — {m['error']}")
             with st.expander("되돌리기를 리눅스 명령어로 보기"):
@@ -466,18 +467,18 @@ with tab_clean:
         n_dup = sum(i["dest_dir"] == "중복 파일" for i in items)
         n_old = sum(any("설치 파일" in f for f in i["flags"]) for i in items)
         n_ai = sum(i["source"] == "gemini" for i in items)
-        heading("AI의 정리 제안을 확인하세요",
-                "파일은 <b>확인을 누르기 전까지 옮기지 않습니다.</b> 이름과 폴더는 아래 표에서 바로 고칠 수 있습니다.")
+        heading("AI가 정리 방법을 골랐어요",
+                "<b>확인을 누르기 전에는 아무것도 옮기지 않아요.</b> 이름이나 폴더가 마음에 안 들면 아래 표에서 바로 고칠 수 있어요.")
         st.markdown(
             '<div class="fs-kpis">'
             f'<div class="fs-kpi"><small>살펴본 파일</small><b>{len(items)}</b></div>'
-            f'<div class="fs-kpi hl"><small>AI가 내용을 읽은 파일</small><b>{n_ai if is_gemini else "규칙"}</b></div>'
-            f'<div class="fs-kpi"><small>민감 파일 (AI에 안 보냄)</small><b>{n_sensitive}</b></div>'
-            f'<div class="fs-kpi"><small>중복 파일</small><b>{n_dup}</b></div>'
+            f'<div class="fs-kpi hl"><small>AI가 내용을 읽은 파일</small><b>{n_ai if is_gemini else "-"}</b></div>'
+            f'<div class="fs-kpi"><small>개인 서류 (AI에 안 보여 줌)</small><b>{n_sensitive}</b></div>'
+            f'<div class="fs-kpi"><small>똑같은 파일</small><b>{n_dup}</b></div>'
             f'<div class="fs-kpi"><small>오래된 설치 파일</small><b>{n_old}</b></div>'
             '</div>', unsafe_allow_html=True)
         if plan["llm_source"] == "fallback":
-            note("Gemini 호출이 일부 실패해서 그 파일들은 <b>규칙 기반</b>으로 분석했습니다. (표의 '분석' 열 참고)", "warn")
+            note("AI 연결이 잠깐 불안정해서 일부 파일은 <b>기본 규칙</b>으로 분류했어요. (표의 '분류 방법' 칸 참고)", "warn")
 
         before_t = tree_from_paths([i["src_rel"] for i in items])
         after_t = tree_from_paths([f"{i['dest_dir']}/{i['new_name']}" if i["include"] else i["src_rel"] for i in items])
@@ -489,32 +490,32 @@ with tab_clean:
             + panel("정리 후 (미리보기)", f"폴더 {n_dirs}개", render_tree(after_t, "정리 폴더", files=False))
             + "</div>", unsafe_allow_html=True)
 
-        st.markdown('<div class="fs-sec">제안 확인·수정</div>', unsafe_allow_html=True)
-        st.caption("새 이름과 옮길 폴더는 칸을 눌러 바로 고칠 수 있습니다. 옮기지 않을 파일은 '포함'을 끄세요.")
+        st.markdown('<div class="fs-sec">정리안 확인·수정</div>', unsafe_allow_html=True)
+        st.caption("칸을 눌러 새 이름과 넣을 폴더를 바꿀 수 있어요. 옮기고 싶지 않은 파일은 '포함' 체크를 빼세요.")
         df = pd.DataFrame([{
-            "포함": i["include"], "새 이름": i["new_name"], "원래 이름": i["src_rel"], "옮길 폴더": i["dest_dir"],
-            "분류": i["category"], "분석": SOURCE_LABEL.get(i["source"], i["source"]), "요약": i["summary"],
+            "포함": i["include"], "새 이름": i["new_name"], "원래 이름": i["src_rel"], "넣을 폴더": i["dest_dir"],
+            "분류": i["category"], "분류 방법": SOURCE_LABEL.get(i["source"], i["source"]), "요약": i["summary"],
             "알림": item_note(i), "id": i["id"],
         } for i in items])
         edited = st.data_editor(
             df, hide_index=True, use_container_width=True, height=min(560, 38 + 35 * len(df)),
-            disabled=["원래 이름", "분류", "요약", "알림", "분석", "id"],
-            column_order=["포함", "새 이름", "원래 이름", "옮길 폴더", "분류", "분석", "요약", "알림"],
+            disabled=["원래 이름", "분류", "요약", "알림", "분류 방법", "id"],
+            column_order=["포함", "새 이름", "원래 이름", "넣을 폴더", "분류", "분류 방법", "요약", "알림"],
             column_config={
                 "포함": st.column_config.CheckboxColumn(width="small"),
                 "새 이름": st.column_config.TextColumn(width="large"),
                 "원래 이름": st.column_config.TextColumn(width="medium"),
-                "옮길 폴더": st.column_config.TextColumn(width="medium"),
+                "넣을 폴더": st.column_config.TextColumn(width="medium"),
                 "분류": st.column_config.TextColumn(width="small"),
-                "분석": st.column_config.TextColumn(width="small"),
+                "분류 방법": st.column_config.TextColumn(width="small"),
                 "요약": st.column_config.TextColumn(width="large"),
                 "알림": st.column_config.TextColumn(width="medium"),
             }, key=f"editor-{plan['id']}")
 
         with st.expander("이 정리를 리눅스 명령어로 보기"):
-            st.caption("서비스가 하는 일은 결국 `mkdir -p`(폴더 만들기)와 `mv -n`(옮기며 이름 바꾸기, 덮어쓰지 않음)입니다. "
-                       "지우는 명령은 없습니다. 내려받아 정리 폴더에서 `bash plan.sh`로 직접 실행해도 같은 결과가 나옵니다. "
-                       "(표에서 고친 내용은 '정리하기'를 누를 때 반영되므로, 아래는 AI 제안 기준입니다.)")
+            st.caption("이 서비스가 하는 일은 사실 두 가지 명령이에요. `mkdir -p`(폴더 만들기)와 `mv -n`(이름 바꿔 옮기기, 같은 이름이 있으면 덮어쓰지 않음). "
+                       "파일을 지우는 명령은 없어요. 내려받아 정리 폴더에서 `bash plan.sh`로 직접 실행해도 결과가 같아요. "
+                       "(표에서 고친 내용은 '정리하기'를 누를 때 반영돼요. 아래는 AI가 처음 고른 정리안이에요.)")
             script = api("GET", f"/api/v1/plans/{plan['id']}/script")
             if isinstance(script, (bytes, bytearray)):
                 text = script.decode("utf-8")
@@ -525,7 +526,7 @@ with tab_clean:
         count = int(edited["포함"].sum())
         with st.container(key="actionbar"):
             c0, c1, c2, c3 = st.columns([5, 1.4, 1, 1.6], vertical_alignment="center")
-            c0.markdown(f'<div class="fs-barnote">선택한 <b>{count}개</b> 파일을 정리합니다 · 언제든 되돌릴 수 있어요</div>',
+            c0.markdown(f'<div class="fs-barnote">선택한 <b>{count}개</b> 파일을 정리해요 · 언제든 되돌릴 수 있어요</div>',
                         unsafe_allow_html=True)
             rescan = c1.button("다시 살펴보기", use_container_width=True)
             cancel = c2.button("취소", use_container_width=True)
@@ -537,8 +538,8 @@ with tab_clean:
                 patch = {}
                 if row["새 이름"] != old["new_name"]:
                     patch["new_name"] = row["새 이름"]
-                if row["옮길 폴더"] != old["dest_dir"]:
-                    patch["dest_dir"] = row["옮길 폴더"]
+                if row["넣을 폴더"] != old["dest_dir"]:
+                    patch["dest_dir"] = row["넣을 폴더"]
                 if bool(row["포함"]) != old["include"]:
                     patch["include"] = bool(row["포함"])
                 if patch:
@@ -578,7 +579,7 @@ def file_icon(path: str) -> str:
 with tab_find:
     _, mid, _ = st.columns([1, 6, 1])
     with mid:
-        heading("무엇을 찾을까요?", "말로 물어보세요. 제목이 아니라 <b>내용</b>으로 찾아 드립니다.")
+        heading("무엇을 찾을까요?", "말하듯 적어 보세요. 파일 이름이 아니라 <b>내용</b>으로 찾아 드려요.")
         with st.container(key="searchbox"):
             with st.form("search-form", border=False):
                 c1, c2 = st.columns([6, 1], vertical_alignment="center")
@@ -608,7 +609,7 @@ with tab_find:
                     if f["date"]:
                         chips += f'<span class="fs-chip g">{esc(f["date"])}</span>'
                     if f["sensitive"]:
-                        chips += '<span class="fs-chip lock">민감 · AI 미사용</span>'
+                        chips += '<span class="fs-chip lock">개인 서류 · AI에 안 보여 줌</span>'
                     card, btn = st.columns([6, 1], vertical_alignment="center")
                     card.markdown(
                         f'<div class="fs-res"><div class="fs-ico">{file_icon(f["path_rel"])}</div><div>'
@@ -627,20 +628,20 @@ with tab_find:
 # 3. 정리 기록
 # ---------------------------------------------------------------------------
 with tab_log:
-    heading("정리 기록", "언제 무엇을 옮겼는지 남아 있고, 어느 기록이든 되돌릴 수 있습니다.")
+    heading("정리 기록", "언제 어떤 파일을 옮겼는지 모두 남아 있어요. 어느 기록이든 되돌릴 수 있어요.")
     batches = api("GET", "/api/v1/batches") or []
     if not batches:
-        note("아직 정리한 기록이 없습니다.")
+        note("아직 정리한 기록이 없어요.")
     for b in batches:
-        state = f"되돌림 ({kst(b['undone_at'])})" if b["undone_at"] else "적용됨"
+        state = f"되돌림 ({kst(b['undone_at'])})" if b["undone_at"] else "정리됨"
         with st.expander(f"#{b['id']}  ·  {kst(b['created_at'])}  ·  {b['moved']}개 정리  ·  {state}"):
             st.dataframe(pd.DataFrame([{"원래 위치": m["src_rel"], "정리된 위치": m["dst_rel"],
-                                        "상태": m["status"], "메모": m["error"] or ""} for m in b["moves"]]),
+                                        "상태": STATUS_LABEL.get(m["status"], m["status"]), "메모": m["error"] or ""} for m in b["moves"]]),
                          hide_index=True, use_container_width=True)
             if not b["undone_at"] and st.button("이 정리 되돌리기", key=f"undo-{b['id']}"):
                 if api("POST", f"/api/v1/batches/{b['id']}/undo") is not None:
                     st.session_state.pop("batch", None)
-                    st.toast("되돌렸습니다.")
+                    st.toast("되돌렸어요.")
                     st.rerun()
 
 
@@ -648,22 +649,22 @@ with tab_log:
 # 4. 설정
 # ---------------------------------------------------------------------------
 with tab_cfg:
-    heading("설정", "다음 '폴더 살펴보기'부터 적용됩니다.")
+    heading("설정", "바꾼 내용은 다음에 '폴더 살펴보기'를 누를 때부터 적용돼요.")
     left, right = st.columns([3, 2], gap="large")
     with left:
         with st.form("settings-form"):
             st.markdown('<div class="fs-sec">내 과목 목록</div>', unsafe_allow_html=True)
             courses = st.text_area(
-                "한 줄에 한 과목. 별칭은 콜론 뒤에 쉼표로 (예: 기계학습: 머신러닝, ML)",
+                "한 줄에 한 과목씩 적어 주세요. 다르게 부르는 이름은 콜론 뒤에 쉼표로 (예: 기계학습: 머신러닝, ML)",
                 value="\n".join(cfg.get("courses", [])), height=150)
             st.markdown('<div class="fs-sec">새 이름 규칙</div>', unsafe_allow_html=True)
             keys = list(PATTERNS)
             pattern = st.radio("이름 규칙", keys, index=keys.index(cfg.get("name_pattern", keys[0])),
                                format_func=PATTERNS.get, label_visibility="collapsed")
             st.markdown('<div class="fs-sec">개인정보</div>', unsafe_allow_html=True)
-            analyze_images = st.toggle("이미지 내용을 AI로 분석하기", value=cfg.get("analyze_images", True),
-                                       help="끄면 이미지는 파일 이름과 내 컴퓨터 OCR로만 분류합니다.")
-            extra = st.text_area("민감 파일로 볼 단어 추가 (한 줄에 하나)",
+            analyze_images = st.toggle("사진 내용도 AI에게 보여 주기", value=cfg.get("analyze_images", True),
+                                       help="끄면 사진은 파일 이름과 내 컴퓨터 안에서 읽은 글자로만 분류해요.")
+            extra = st.text_area("이 단어가 들어간 파일은 AI에게 보여 주지 않기 (한 줄에 하나)",
                                  value="\n".join(cfg.get("extra_sensitive_keywords", [])), height=80,
                                  placeholder="예: 성적증명서")
             if st.form_submit_button("저장", type="primary"):
@@ -671,31 +672,31 @@ with tab_cfg:
                         "analyze_images": analyze_images,
                         "extra_sensitive_keywords": [k for k in extra.splitlines() if k.strip()]}
                 if api("PUT", "/api/v1/settings", json=body) is not None:
-                    st.toast("저장했습니다. 다음 '폴더 살펴보기'부터 적용됩니다.")
+                    st.toast("저장했어요. 다음 '폴더 살펴보기'부터 적용돼요.")
                     st.rerun()
     with right:
         with st.container(border=True, key="card-3"):
             st.markdown('<div class="fs-sec">정리 폴더</div>', unsafe_allow_html=True)
             st.code(cfg.get("target_dir", "?"), language=None)
-            st.caption("바꾸려면 `.env`의 `HOST_TARGET_DIR`를 고친 뒤 `docker compose up -d`로 다시 시작하세요. "
+            st.caption("다른 폴더를 정리하려면 설정 파일(`.env`)의 `HOST_TARGET_DIR`를 고친 뒤 `docker compose up -d`로 다시 시작해 주세요. "
                        "(Windows 예: `HOST_TARGET_DIR=C:/Users/내아이디/Downloads`)")
         if cfg.get("demo_reset_available"):
             with st.container(border=True, key="card-4"):
-                st.markdown('<div class="fs-sec">발표 리허설</div>', unsafe_allow_html=True)
-                st.caption("연습 폴더를 '정리 전' 상태로 되돌립니다.")
+                st.markdown('<div class="fs-sec">연습 폴더</div>', unsafe_allow_html=True)
+                st.caption("연습용 파일을 처음 상태로 되돌려요.")
                 if st.button("연습 폴더 초기화", use_container_width=True):
                     res = api("POST", "/api/v1/demo/reset", timeout=120)
                     if res is not None:
                         for key in ("plan", "batch", "search"):
                             st.session_state.pop(key, None)
-                        st.toast(f"샘플 파일 {res.get('copied', 0)}개를 다시 넣었습니다.")
+                        st.toast(f"연습용 파일 {res.get('copied', 0)}개를 다시 넣었어요.")
                         st.rerun()
         with st.container(border=True, key="card-5"):
             st.markdown('<div class="fs-sec">KNIME 실습용 데이터</div>', unsafe_allow_html=True)
-            st.caption("파일마다 이름 특징·규칙 분류·Gemini 분류(미리 저장된 것)·정답(연습 폴더)을 CSV로 내려받습니다. "
-                       "Gemini를 새로 부르지 않습니다. 사용법은 `knime/README.md`를 보세요.")
+            st.caption("파일 정보와 분류 결과를 표(CSV)로 내려받아요. KNIME 실습에 쓸 수 있고, AI를 새로 부르지 않아요. "
+                       "사용법은 `knime/README.md`에 있어요.")
             if st.button("CSV 만들기", use_container_width=True):
-                with st.spinner("파일을 읽는 중… (이미지 글자 인식 때문에 수십 초 걸릴 수 있어요)"):
+                with st.spinner("파일을 읽는 중이에요… 사진이 많으면 조금 걸려요."):
                     data = api("GET", "/api/v1/export/knime.csv", timeout=300)
                 if isinstance(data, (bytes, bytearray)):
                     st.session_state["knime_csv"] = bytes(data)
