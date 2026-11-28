@@ -325,31 +325,24 @@ def pill(text: str, dot: str = "", title: str = "") -> str:
 
 def watcher_pill(w: dict) -> str:
     if not w.get("running"):
-        return pill("새 파일 자동 준비 · 꺼짐", "off")
+        return pill("폴더 감시 데몬 · 꺼짐", "off")
     total, ready = w.get("loose", 0), w.get("ready", 0)
     if w.get("state") == "analyzing":
         if w.get("message", "").startswith("자주 쓰는 검색"):
-            return pill("자주 찾는 질문 준비 중", "busy", w.get("message", ""))
-        return pill(f"새 파일 읽는 중 · {ready}/{total}", "busy", w.get("message", ""))
+            return pill("폴더 감시 데몬 · 검색 미리 준비 중", "busy", w.get("message", ""))
+        return pill(f"폴더 감시 데몬 · 미리 분석 중 {ready}/{total}", "busy", w.get("message", ""))
     if total:
-        return pill(f"파일 {total}개 준비 완료" if ready >= total else f"파일 준비 · {ready}/{total}", "", w.get("message", ""))
-    return pill("새 파일 기다리는 중", "", w.get("message", ""))
+        return pill(f"폴더 감시 데몬 · {ready}/{total} 준비됨", "", w.get("message", ""))
+    return pill("폴더 감시 데몬 · 켜짐", "", w.get("message", ""))
 
 
-LIVE_SECONDS = 4  # 상단 상태와 시작 화면을 몇 초마다 저절로 새로 고칠지
+LIVE_SECONDS = 4  # 시작 화면과 개발자용 상태를 몇 초마다 저절로 새로 고칠지
 
 
-@st.fragment(run_every=LIVE_SECONDS)
 def top_bar() -> None:
-    """상단 바. 이 부분만 몇 초마다 다시 그려서 폴더 감시 진행 상황이 실시간으로 바뀐다."""
-    w = api("GET", "/api/v1/watcher") or {}
-    st.markdown(
-        '<div class="fs-top"><div class="in"><div class="fs-brand"><div class="fs-logo">F</div>파일 정리 비서</div>'
-        '<div class="fs-pills">'
-        + pill("AI 연결됨" if is_gemini else "AI 꺼짐 · 기본 규칙으로 분류", "" if is_gemini else "off", cfg.get("gemini_model", ""))
-        + watcher_pill(w)
-        + pill("사진 속 글자 읽기 · " + ("켜짐" if cfg.get("ocr_enabled") else "꺼짐"), "" if cfg.get("ocr_enabled") else "off")
-        + "</div></div></div>", unsafe_allow_html=True)
+    """상단 바: 로고와 메뉴만. AI·폴더 감시·OCR 상태는 사용자가 알 필요가 없어 설정 탭의 개발자 정보로 옮겼다."""
+    st.markdown('<div class="fs-top"><div class="in"><div class="fs-brand"><div class="fs-logo">F</div>파일 정리 비서</div>'
+                '</div></div>', unsafe_allow_html=True)
 
 
 top_bar()
@@ -416,12 +409,22 @@ def start_view() -> None:
                     unsafe_allow_html=True)
 
 
+@st.fragment(run_every=LIVE_SECONDS)
+def dev_status() -> None:
+    """개발자용 서비스 상태 (사용자 화면에는 보이지 않고 설정 탭에만). 몇 초마다 저절로 갱신."""
+    w = api("GET", "/api/v1/watcher") or {}
+    with st.container(border=True, key="card-dev"):
+        st.markdown('<div class="fs-sec">서비스 상태 (개발자용)</div>'
+                    '<div class="fs-pills" style="margin:0 0 10px 0;justify-content:flex-start">'
+                    + pill(f"Gemini · {cfg.get('gemini_model', '')}" if is_gemini else "AI 꺼짐 · 규칙 기반", "" if is_gemini else "off")
+                    + watcher_pill(w)
+                    + pill("OCR " + ("켜짐" if cfg.get("ocr_enabled") else "꺼짐"), "" if cfg.get("ocr_enabled") else "off")
+                    + "</div>", unsafe_allow_html=True)
+
+
 with tab_clean:
     plan = st.session_state.get("plan")
     batch = st.session_state.get("batch")
-    if not is_gemini:
-        note("지금은 AI 없이 <b>기본 규칙</b>으로만 분류해요. AI를 쓰려면 설정 파일(<code>.env</code>)에 Gemini 키를 넣어 주세요.",
-             "warn")
 
     if batch:  # ---- 3단계: 정리 직후 ----
         steps(3)
@@ -675,6 +678,7 @@ with tab_cfg:
                     st.toast("저장했어요. 다음 '폴더 살펴보기'부터 적용돼요.")
                     st.rerun()
     with right:
+        dev_status()
         with st.container(border=True, key="card-3"):
             st.markdown('<div class="fs-sec">정리 폴더</div>', unsafe_allow_html=True)
             st.code(cfg.get("target_dir", "?"), language=None)
