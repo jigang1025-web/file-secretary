@@ -5,6 +5,8 @@ API 서버(FastAPI)를 REST로 호출해서 화면에 보여 주는 '클라이�
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import html
 import os
 import time
@@ -54,14 +56,16 @@ html, body, .stApp, .stApp button, .stApp input, .stApp textarea {
 .stApp {background: var(--bg); color: var(--ink);}
 header[data-testid="stHeader"], [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"],
 [data-testid="stHeaderActionElements"] {display: none !important;}
-.block-container {padding: 0 2.25rem 3rem; max-width: 1400px;}
 h1, h2, h3, h4, h5 {color: var(--ink); letter-spacing: -0.02em;}
 .stApp a {color: var(--acc-ink);}
 
-/* ---- 상단 바: 로고 + (탭 메뉴가 가운데로 올라옴) + 상태 알약 ---- */
-.fs-top {position: relative; left: 50%; width: 100vw; margin-left: -50vw; background: var(--card);
-         border-bottom: 1px solid var(--line); height: 64px; margin: -1rem 0 26px -50vw;}
-.fs-top .in {max-width: 1400px; margin: 0 auto; padding: 0 2.25rem; height: 64px; display: flex; align-items: center;}
+/* ---- 레이아웃: 위에 고정된 상단 바(로고) + 왼쪽에 고정된 세로 메뉴(탭) ---- */
+:root {--top-h: 64px; --nav-w: 220px;}
+.block-container {max-width: calc(1400px + var(--nav-w)) !important; margin-left: 0 !important;
+                  padding: calc(var(--top-h) + 28px) 2.5rem 3rem calc(var(--nav-w) + 2.5rem) !important;}
+.fs-top {position: fixed; left: 0; top: 0; width: 100vw; height: var(--top-h); z-index: 40;
+         background: var(--card); border-bottom: 1px solid var(--line);}
+.fs-top .in {height: var(--top-h); padding: 0 24px; display: flex; align-items: center;}
 .fs-brand {display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 1.15rem; white-space: nowrap;}
 .fs-logo {width: 30px; height: 30px; border-radius: 9px; background: var(--acc); color: #fff; display: grid;
           place-items: center; font-size: .95rem; font-weight: 800;}
@@ -73,20 +77,30 @@ h1, h2, h3, h4, h5 {color: var(--ink); letter-spacing: -0.02em;}
 .fs-dot.busy {background: var(--acc); animation: fs-blink 1.2s infinite;}
 @keyframes fs-blink {50% {opacity: .25;}}
 
-div[data-testid="stTabs"] [role="tablist"] {gap: 4px; background: transparent; border: 0 !important; box-shadow: none !important;
-  position: relative; z-index: 5; width: fit-content; margin: -76px 0 24px 210px;}
+div[data-testid="stTabs"] [role="tablist"] {position: fixed !important; left: 0; top: var(--top-h); bottom: 0; z-index: 30;
+  width: var(--nav-w); box-sizing: border-box; margin: 0 !important; padding: 24px 16px;
+  display: flex; flex-direction: column; align-items: stretch; gap: 6px;
+  background: var(--card); border: 0 !important; border-right: 1px solid var(--line) !important; box-shadow: none !important;}
 div[data-testid="stTabs"] [role="tablist"]::before, div[data-testid="stTabs"] [role="tablist"]::after {display: none !important;}
 div[data-testid="stTabs"] > div > div:first-child {border: 0 !important; box-shadow: none !important;}
 div[data-testid="stTabs"] .react-aria-SelectionIndicator {display: none !important;}
-div[data-testid="stTab"] {padding: 8px 14px !important; border-radius: 9px; height: auto; background: transparent; margin: 0 !important;}
-div[data-testid="stTab"] p {font-size: .95rem !important; font-weight: 600; color: var(--sub);}
+div[data-testid="stTab"] {padding: 12px 16px !important; border-radius: 10px; height: auto; background: transparent;
+  margin: 0 !important; width: 100%; box-sizing: border-box; justify-content: flex-start;}
+div[data-testid="stTab"] p {font-size: 1rem !important; font-weight: 600; color: var(--sub); display: flex; align-items: center; gap: 10px;}
+div[data-testid="stTab"] p span[role="img"] {font-size: 1.3rem !important; color: inherit;}
+div[data-testid="stTab"]:hover {background: var(--muted-soft);}
 div[data-testid="stTab"]:hover p {color: var(--ink);}
 div[data-testid="stTab"][aria-selected="true"] {background: var(--acc-soft);}
 div[data-testid="stTab"][aria-selected="true"] p {color: var(--acc-ink);}
-@media (max-width: 1180px) {
-  .fs-top {height: auto;} .fs-top .in {height: auto; flex-wrap: wrap; padding-top: 12px; padding-bottom: 12px; gap: 10px;}
-  .fs-pills {margin-left: 0; justify-content: flex-start;}
-  div[data-testid="stTabs"] [role="tablist"] {margin: -12px 0 22px 0;}
+
+/* 좁은 화면(크게 확대했을 때): 왼쪽 메뉴를 아이콘만 남겨 폭을 줄인다 */
+@media (max-width: 900px) {
+  :root {--nav-w: 72px;}
+  .block-container {padding-left: calc(var(--nav-w) + 1.25rem) !important; padding-right: 1.25rem !important;}
+  div[data-testid="stTabs"] [role="tablist"] {padding: 20px 10px;}
+  div[data-testid="stTab"] {justify-content: center; padding: 12px 0 !important;}
+  div[data-testid="stTab"] p {font-size: 0 !important; gap: 0;}
+  div[data-testid="stTab"] p span[role="img"] {font-size: 1.5rem !important;}
 }
 
 /* ---- 버튼 ---- */
@@ -167,6 +181,7 @@ div[data-testid="stCode"] pre {border-radius: 12px;}
 .st-key-searchbox input {font-size: 1.05rem; background: var(--bg) !important; border: 0 !important; padding: 12px 14px !important;}
 .st-key-searchbox [data-baseweb="input"] {border: 0 !important; background: var(--bg) !important; border-radius: 11px !important;}
 .st-key-searchbox button {height: 46px;}
+.stApp [data-testid="stButtonGroup"] > div {flex-wrap: wrap;}
 .stApp [data-testid="stButtonGroup"] button {border-radius: 999px; border: 1px solid var(--line);
   background: var(--card); font-weight: 600;}
 .fs-answer {background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--acc); border-radius: 16px;
@@ -179,7 +194,8 @@ div[data-testid="stCode"] pre {border-radius: 12px;}
          display: grid; grid-template-columns: 44px 1fr; gap: 14px; align-items: start;}
 .fs-ico {width: 44px; height: 44px; border-radius: 12px; background: var(--acc-soft); color: var(--acc-ink);
          display: grid; place-items: center; font-weight: 800; font-size: .72rem;}
-.fs-res .t {font-weight: 700; font-size: 1.02rem;}
+.fs-res .t {font-weight: 700; font-size: 1.02rem; color: var(--ink) !important; text-decoration: none; display: inline-block;}
+.fs-res a.t:hover {color: var(--acc-ink) !important; text-decoration: underline;}
 .fs-res .p {color: var(--sub); font-size: .8rem; margin: 2px 0 8px; font-family: ui-monospace, Menlo, Consolas, monospace;
             word-break: break-all;}
 .fs-res .s {color: #44403C; margin-top: 8px; font-size: .92rem;}
@@ -229,6 +245,13 @@ def human(n: int) -> str:
             return f"{size:.0f}{unit}" if unit == "B" else f"{size:.1f}{unit}"
         size /= 1024
     return f"{n}B"
+
+
+def file_link(file_id: int) -> str:
+    """브라우저 새 탭에서 파일을 여는 주소. API 서버가 확인하는 만료 시간 있는 서명을 붙인다 (1시간)."""
+    exp = int(time.time()) + 3600
+    sig = hmac.new((API_KEY or "local-dev").encode(), f"file:{file_id}:{exp}".encode(), hashlib.sha256).hexdigest()
+    return f"{PUBLIC_API_URL}/api/v1/files/{file_id}/open?exp={exp}&sig={sig}"
 
 
 def esc(s) -> str:
@@ -346,7 +369,8 @@ def top_bar() -> None:
 
 
 top_bar()
-tab_clean, tab_find, tab_log, tab_cfg = st.tabs(["정리하기", "찾기", "정리 기록", "설정"])
+tab_clean, tab_find, tab_log, tab_cfg = st.tabs([":material/folder_open: 정리하기", ":material/search: 찾기",
+                                                ":material/history: 정리 기록", ":material/settings: 설정"])
 
 
 # ---------------------------------------------------------------------------
@@ -446,10 +470,6 @@ with tab_clean:
                 with st.expander(f"옮기지 못한 파일 {len(skipped)}개"):
                     for m in skipped:
                         st.write(f"- `{m['src_rel']}` — {m['error']}")
-            with st.expander("되돌리기를 리눅스 명령어로 보기"):
-                undo = api("GET", f"/api/v1/batches/{batch['id']}/script")
-                if isinstance(undo, (bytes, bytearray)):
-                    st.code(undo.decode("utf-8"), language="bash")
 
     elif not plan:  # ---- 1단계: 시작 화면 (실시간) ----
         start_view()
@@ -505,17 +525,6 @@ with tab_clean:
                 "요약": st.column_config.TextColumn(width="large"),
                 "알림": st.column_config.TextColumn(width="medium"),
             }, key=f"editor-{plan['id']}")
-
-        with st.expander("이 정리를 리눅스 명령어로 보기"):
-            st.caption("이 서비스가 하는 일은 사실 두 가지 명령이에요. `mkdir -p`(폴더 만들기)와 `mv -n`(이름 바꿔 옮기기, 같은 이름이 있으면 덮어쓰지 않음). "
-                       "파일을 지우는 명령은 없어요. 내려받아 정리 폴더에서 `bash plan.sh`로 직접 실행해도 결과가 같아요. "
-                       "(표에서 고친 내용은 '정리하기'를 누를 때 반영돼요. 아래는 AI가 처음 고른 정리안이에요.)")
-            script = api("GET", f"/api/v1/plans/{plan['id']}/script")
-            if isinstance(script, (bytes, bytearray)):
-                text = script.decode("utf-8")
-                st.code(text, language="bash")
-                st.download_button("셸 스크립트 내려받기", data=text.encode("utf-8"),
-                                   file_name=f"plan-{plan['id']}.sh", mime="text/x-shellscript")
 
         count = int(edited["포함"].sum())
         with st.container(key="actionbar"):
@@ -595,7 +604,7 @@ with tab_find:
                     f'<div class="fs-answer"><div class="ai">AI</div><div><div class="a">{esc(res["answer"])}</div>'
                     f'<div class="meta"><span class="fs-chip src">{SOURCE_LABEL.get(res["source"], res["source"])}</span>'
                     f'결과 {len(res["results"])}개 · {secs:.1f}초</div></div></div>', unsafe_allow_html=True)
-                for n, hit in enumerate(res["results"]):
+                for hit in res["results"]:
                     f = hit["file"]
                     chips = f'<span class="fs-chip">{esc(f["category"])}</span>'
                     if f["course"]:
@@ -604,18 +613,13 @@ with tab_find:
                         chips += f'<span class="fs-chip g">{esc(f["date"])}</span>'
                     if f["sensitive"]:
                         chips += '<span class="fs-chip lock">개인 서류 · AI에 안 보여 줌</span>'
-                    card, btn = st.columns([6, 1], vertical_alignment="center")
-                    card.markdown(
+                    st.markdown(
                         f'<div class="fs-res"><div class="fs-ico">{file_icon(f["path_rel"])}</div><div>'
-                        f'<div class="t">{esc(f["title"] or f["original_name"])}</div>'
-                        f'<div class="p">{esc(f["path_rel"])}</div>{chips}'
+                        f'<a class="t" href="{esc(file_link(f["id"]))}" target="_blank" rel="noopener" '
+                        f'title="눌러서 파일 열기">{esc(f["title"] or f["original_name"])}</a>'
+                        f'<div class="p">{esc(f["path_rel"])} · {human(f["size"])}</div>{chips}'
                         f'<div class="s">{esc(f["summary"])}</div>'
                         f'<div class="r">→ {esc(hit["reason"])}</div></div></div>', unsafe_allow_html=True)
-                    if n < 5 and f["size"] <= 20 * 1024 * 1024:
-                        data = api("GET", f"/api/v1/files/{f['id']}/content")
-                        if isinstance(data, bytes):
-                            btn.download_button(f"열기 · {human(f['size'])}", data=data, use_container_width=True,
-                                                file_name=f["path_rel"].rsplit("/", 1)[-1], key=f"dl-{f['id']}")
 
 
 # ---------------------------------------------------------------------------
