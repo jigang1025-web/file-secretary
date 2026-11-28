@@ -376,7 +376,6 @@ def start_view() -> None:
     """1단계 시작 화면. 새 파일이 들어오거나 미리 읽기가 끝나면 저절로 바뀐다."""
     steps(1)
     live_stats = api("GET", "/api/v1/stats") or {}
-    live_w = api("GET", "/api/v1/watcher") or {}
     loose = live_stats.get("loose_files", 0)
     heading(f"정리가 필요한 파일이 {loose}개 있어요",
             "AI가 파일을 열어 보고 알아보기 쉬운 이름과 폴더를 골라 드려요. <b>확인을 누르기 전에는 아무것도 옮기지 않아요.</b>")
@@ -384,19 +383,11 @@ def start_view() -> None:
         '<div class="fs-kpis">'
         f'<div class="fs-kpi hl"><small>정리할 파일</small><b>{loose}</b></div>'
         f'<div class="fs-kpi"><small>정리된 파일</small><b>{live_stats.get("organized_files", 0)}</b></div>'
-        f'<div class="fs-kpi"><small>미리 읽어 둔 파일</small><b>{live_w.get("ready", 0)}</b></div>'
         '</div>', unsafe_allow_html=True)
     left, right = st.columns([2, 3], gap="large")
     with left:
         with st.container(border=True, key="card-2"):
             st.markdown('<div class="fs-sec">폴더 살펴보기</div>', unsafe_allow_html=True)
-            if live_w.get("running") and loose:
-                ready, total = live_w.get("ready", 0), live_w.get("loose", 0)
-                if total and ready >= total:
-                    note("새로 들어온 파일을 <b>모두 미리 읽어 두었어요.</b> 지금 누르면 바로 끝나요.", "done")
-                else:
-                    note(f"새로 들어온 파일을 미리 읽고 있어요 (<b>{ready}/{total}</b>). "
-                         "다 끝난 뒤에 누르면 기다리지 않아도 돼요.", "acc")
             st.write("누르면 AI가 문서와 사진 내용을 읽고 **새 이름 → 종류 → 넣을 폴더**를 한 번에 정해 드려요. "
                      "신분증·통장 같은 개인 서류는 AI에게 보여 주지 않아요.")
             if st.button("폴더 살펴보기", type="primary", disabled=loose == 0, use_container_width=True):
