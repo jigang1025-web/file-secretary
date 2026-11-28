@@ -1,8 +1,8 @@
 [theme]
 base = "light"
-primaryColor = "#0F6E56"
+primaryColor = "#4F46E5"
 backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F2F7F5"
+secondaryBackgroundColor = "#F5F6FB"
 textColor = "#1F2328"
 
 [client]

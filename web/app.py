@@ -30,29 +30,45 @@ PATTERNS = {
 }
 SOURCE_LABEL = {"gemini": "Gemini", "mock": "규칙", "fallback": "규칙(대체)", "rule": "보호·중복"}
 
-st.set_page_config(page_title="파일 정리 비서", page_icon="🗂️", layout="wide")
+st.set_page_config(page_title="파일 정리 비서", page_icon="🗂️", layout="wide", initial_sidebar_state="expanded")
 st.markdown("""
 <style>
-.block-container {padding-top: 2.2rem; max-width: 1280px;}
+/* 글자를 키우고(발표·확대 화면에서도 읽히게) 폭을 넓힌다 */
+html {font-size: 17px;}
+html, body, .stApp {font-family: "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;}
+.block-container {padding-top: 2rem; padding-left: 3rem; padding-right: 3rem; max-width: 1560px;}
 [data-testid="stHeaderActionElements"] {display: none;}
-.fs-hero {background: linear-gradient(135deg, #0F6E56 0%, #138A6C 60%, #1FA37F 100%); color: #fff;
-          border-radius: 18px; padding: 22px 28px; margin-bottom: 18px;}
-.fs-hero h1 {color: #fff; font-size: 2.0rem; margin: 0 0 4px 0; padding: 0;}
-.fs-hero p {margin: 0; opacity: .92; font-size: 1.02rem;}
-.fs-tree {background: #F6F8FA; border: 1px solid #E3E8EE; border-radius: 12px; padding: 14px 16px;
-          font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .86rem;
-          line-height: 1.55; white-space: pre; overflow-x: auto; max-height: 460px; overflow-y: auto;}
-.fs-tree .dir {color: #0F6E56; font-weight: 700;}
+button[data-baseweb="tab"] p {font-size: 1.08rem; font-weight: 600;}
+div[data-testid="stButton"] button, div[data-testid="stDownloadButton"] button {border-radius: 10px;}
+
+.fs-hero {background: linear-gradient(135deg, #1E1B4B 0%, #3730A3 55%, #4F46E5 100%); color: #fff;
+          border-radius: 20px; padding: 28px 34px; margin-bottom: 16px;}
+.fs-hero h1 {color: #fff; font-size: 2.3rem; margin: 0 0 6px 0; padding: 0; letter-spacing: -0.02em;}
+.fs-hero p {margin: 0; opacity: .92; font-size: 1.08rem;}
+
+.fs-status {display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 22px 0;}
+.fs-chip {background: #fff; border: 1px solid #E2E4F0; border-radius: 14px; padding: 10px 16px;
+          font-size: .98rem; line-height: 1.3; min-width: 150px;}
+.fs-chip small {display: block; font-size: .78rem; color: #6B7280; font-weight: 600; margin-bottom: 3px;}
+.fs-chip.ok {background: #EEF2FF; border-color: #C7D2FE;}
+.fs-chip.warn {background: #FFF7ED; border-color: #FED7AA;}
+.fs-chip .num {font-size: 1.5rem; font-weight: 700; color: #3730A3;}
+
+.fs-tree {background: #F7F8FC; border: 1px solid #E2E4F0; border-radius: 14px; padding: 16px 18px;
+          font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92rem;
+          line-height: 1.6; white-space: pre; overflow-x: auto; max-height: 520px; overflow-y: auto;}
+.fs-tree .dir {color: #3730A3; font-weight: 700;}
 .fs-tree .muted {color: #8A94A0;}
-.fs-card {border: 1px solid #E3E8EE; border-radius: 14px; padding: 14px 18px; margin-bottom: 10px; background: #fff;}
-.fs-card .title {font-weight: 700; font-size: 1.05rem;}
-.fs-card .path {font-family: ui-monospace, Menlo, Consolas, monospace; color: #57606A; font-size: .85rem;}
-.fs-badge {display: inline-block; background: #E8F5EF; color: #0F6E56; border-radius: 999px; padding: 1px 10px;
-           font-size: .8rem; margin-right: 6px;}
+.fs-card {border: 1px solid #E2E4F0; border-radius: 16px; padding: 16px 20px; margin-bottom: 12px; background: #fff;
+          box-shadow: 0 1px 2px rgba(30, 27, 75, .04);}
+.fs-card .title {font-weight: 700; font-size: 1.12rem;}
+.fs-card .path {font-family: ui-monospace, Menlo, Consolas, monospace; color: #57606A; font-size: .88rem;}
+.fs-badge {display: inline-block; background: #EEF2FF; color: #3730A3; border-radius: 999px; padding: 2px 12px;
+           font-size: .84rem; margin-right: 6px;}
 .fs-badge.warn {background: #FFF4E5; color: #9A5B00;}
 .fs-badge.lock {background: #FDECEC; color: #B42318;}
-.fs-answer {background: #F0F7FF; border-left: 4px solid #2F6FEB; padding: 10px 14px; border-radius: 8px;
-            margin: 6px 0 14px 0;}
+.fs-answer {background: #EEF2FF; border-left: 4px solid #4F46E5; padding: 12px 16px; border-radius: 10px;
+            margin: 6px 0 16px 0; font-size: 1.02rem;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -167,19 +183,29 @@ st.markdown('<div class="fs-hero"><h1>🗂️ 파일 정리 비서</h1>'
             '<p>생성 AI가 파일 내용을 읽고 → 알아보기 쉬운 이름을 짓고 → 폴더별로 정리하고 → 말로 찾아 드립니다.</p></div>',
             unsafe_allow_html=True)
 
+
+def chip(label: str, value: str, kind: str = "", num: bool = False) -> str:
+    body = f'<span class="num">{html.escape(value)}</span>' if num else html.escape(value)
+    return f'<div class="fs-chip {kind}"><small>{html.escape(label)}</small>{body}</div>'
+
+
+# 핵심 상태는 본문 맨 위에 둔다 (화면을 확대해서 사이드바가 접혀도 보이도록)
+is_gemini = cfg.get("llm_mode") == "gemini"
+watch_text = watcher_line(watcher).replace("폴더 감시: ", "", 1)
+st.markdown(
+    '<div class="fs-status">'
+    + chip("AI 분석", f"Gemini · {cfg.get('gemini_model', '')}" if is_gemini else "규칙 기반", "ok" if is_gemini else "warn")
+    + chip("이미지 속 민감 정보 확인(OCR)", "켜짐" if cfg.get("ocr_enabled") else "꺼짐")
+    + chip("폴더 감시", watch_text, "ok" if watcher.get("running") else "warn")
+    + chip("흩어진 파일", str(stats.get("loose_files", 0)), num=True)
+    + chip("정리된 파일", str(stats.get("organized_files", 0)), num=True)
+    + "</div>", unsafe_allow_html=True)
+if not is_gemini:
+    st.warning("AI 분석이 **규칙 기반**입니다. `.env`에 `GEMINI_API_KEY`를 넣으면 AI가 파일 내용을 읽습니다.")
+
 with st.sidebar:
-    st.subheader("상태")
-    if cfg.get("llm_mode") == "gemini":
-        st.success(f"AI 분석: **Gemini** (`{cfg.get('gemini_model')}`)")
-    else:
-        st.warning("AI 분석: **규칙 기반** (Gemini 키 없음)\n\n`.env`에 `GEMINI_API_KEY`를 넣으면 AI가 내용을 읽습니다.")
-    st.caption(f"🔒 이미지 속 민감 정보 확인(OCR): {'켜짐' if cfg.get('ocr_enabled') else '꺼짐'}")
-    st.caption(watcher_line(watcher))
     st.subheader("정리 폴더")
     st.code(cfg.get("target_dir", "?"), language=None)
-    c1, c2 = st.columns(2)
-    c1.metric("흩어진 파일", stats.get("loose_files", 0))
-    c2.metric("정리된 파일", stats.get("organized_files", 0))
     if cfg.get("demo_reset_available"):
         st.divider()
         st.caption("연습 폴더를 '정리 전' 상태로 되돌립니다 (발표 리허설용).")
