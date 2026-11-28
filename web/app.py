@@ -315,8 +315,6 @@ def panel(title: str, right: str, body: str) -> str:
 # ---------------------------------------------------------------------------
 health = api("GET", "/health") or {}
 cfg = api("GET", "/api/v1/settings") or {}
-stats = api("GET", "/api/v1/stats") or {}
-watcher = api("GET", "/api/v1/watcher") or {}
 is_gemini = cfg.get("llm_mode") == "gemini"
 
 
@@ -329,20 +327,31 @@ def watcher_pill(w: dict) -> str:
         return pill("폴더 감시 · 꺼짐", "off")
     total, ready = w.get("loose", 0), w.get("ready", 0)
     if w.get("state") == "analyzing":
+        if w.get("message", "").startswith("자주 쓰는 검색"):
+            return pill("폴더 감시 · 검색 미리 준비 중", "busy", w.get("message", ""))
         return pill(f"폴더 감시 · 미리 읽는 중 {ready}/{total}", "busy", w.get("message", ""))
     if total:
         return pill(f"폴더 감시 · {ready}/{total} 준비됨", "", w.get("message", ""))
     return pill("폴더 감시 · 켜짐", "", w.get("message", ""))
 
 
-st.markdown(
-    '<div class="fs-top"><div class="in"><div class="fs-brand"><div class="fs-logo">F</div>파일 정리 비서</div>'
-    '<div class="fs-pills">'
-    + pill(f"Gemini · {cfg.get('gemini_model', '')}" if is_gemini else "AI 분석 · 규칙 기반", "" if is_gemini else "off")
-    + watcher_pill(watcher)
-    + pill("OCR " + ("켜짐" if cfg.get("ocr_enabled") else "꺼짐"), "" if cfg.get("ocr_enabled") else "off")
-    + "</div></div></div>", unsafe_allow_html=True)
+LIVE_SECONDS = 4  # 상단 상태와 시작 화면을 몇 초마다 저절로 새로 고칠지
 
+
+@st.fragment(run_every=LIVE_SECONDS)
+def top_bar() -> None:
+    """상단 바. 이 부분만 몇 초마다 다시 그려서 폴더 감시 진행 상황이 실시간으로 바뀐다."""
+    w = api("GET", "/api/v1/watcher") or {}
+    st.markdown(
+        '<div class="fs-top"><div class="in"><div class="fs-brand"><div class="fs-logo">F</div>파일 정리 비서</div>'
+        '<div class="fs-pills">'
+        + pill(f"Gemini · {cfg.get('gemini_model', '')}" if is_gemini else "AI 분석 · 규칙 기반", "" if is_gemini else "off")
+        + watcher_pill(w)
+        + pill("OCR " + ("켜짐" if cfg.get("ocr_enabled") else "꺼짐"), "" if cfg.get("ocr_enabled") else "off")
+        + "</div></div></div>", unsafe_allow_html=True)
+
+
+top_bar()
 tab_clean, tab_find, tab_log, tab_cfg = st.tabs(["정리하기", "찾기", "정리 기록", "설정"])
 
 
@@ -366,6 +375,44 @@ def item_note(it: dict) -> str:
     if it.get("error"):
         notes.append(f"오류: {it['error']}")
     return " · ".join(notes)
+
+
+@st.fragment(run_every=LIVE_SECONDS)
+def start_view() -> None:
+    """1단계 시작 화면. 새 파일이 들어오거나 미리 읽기가 끝나면 저절로 바뀐다."""
+    steps(1)
+    live_stats = api("GET", "/api/v1/stats") or {}
+    live_w = api("GET", "/api/v1/watcher") or {}
+    loose = live_stats.get("loose_files", 0)
+    heading(f"정리 폴더에 흩어진 파일 {loose}개",
+            "AI가 파일 <b>내용</b>을 읽고 새 이름과 폴더를 제안합니다. 파일은 <b>확인을 누르기 전까지 옮기지 않습니다.</b>")
+    st.markdown(
+        '<div class="fs-kpis">'
+        f'<div class="fs-kpi hl"><small>흩어진 파일</small><b>{loose}</b></div>'
+        f'<div class="fs-kpi"><small>정리된 파일</small><b>{live_stats.get("organized_files", 0)}</b></div>'
+        f'<div class="fs-kpi"><small>미리 읽어 둔 파일</small><b>{live_w.get("ready", 0)}</b></div>'
+        '</div>', unsafe_allow_html=True)
+    left, right = st.columns([2, 3], gap="large")
+    with left:
+        with st.container(border=True, key="card-2"):
+            st.markdown('<div class="fs-sec">폴더 살펴보기</div>', unsafe_allow_html=True)
+            if live_w.get("running") and loose:
+                ready, total = live_w.get("ready", 0), live_w.get("loose", 0)
+                if total and ready >= total:
+                    note("폴더 감시 데몬이 새 파일을 <b>모두 미리 읽어 두었습니다.</b> 살펴보기가 바로 끝납니다.", "done")
+                else:
+                    note(f"폴더 감시 데몬이 새 파일을 미리 읽는 중입니다 (<b>{ready}/{total}</b>). "
+                         "끝난 뒤에 누르면 기다리지 않습니다. 진행 상황은 화면에 저절로 반영됩니다.", "acc")
+            st.write("Gemini가 문서·이미지 내용을 읽고 **이름 짓기 → 분류 → 폴더 제안**까지 한 번에 합니다. "
+                     "신분증·통장 같은 민감 파일은 AI에 보내지 않습니다.")
+            if st.button("폴더 살펴보기", type="primary", disabled=loose == 0, use_container_width=True):
+                start_scan()
+            if loose == 0:
+                st.caption("정리할 파일이 없습니다. 설정 탭의 '연습 폴더 초기화'로 샘플을 넣어 보세요.")
+    with right:
+        tree = api("GET", "/api/v1/tree", params={"depth": 1}) or {}
+        st.markdown(panel("정리 전", f"{loose}개", render_tree(tree_from_api(tree), "정리 폴더", max_files=12)),
+                    unsafe_allow_html=True)
 
 
 with tab_clean:
@@ -409,38 +456,8 @@ with tab_clean:
                 if isinstance(undo, (bytes, bytearray)):
                     st.code(undo.decode("utf-8"), language="bash")
 
-    elif not plan:  # ---- 1단계: 시작 화면 ----
-        steps(1)
-        loose = stats.get("loose_files", 0)
-        heading(f"정리 폴더에 흩어진 파일 {loose}개",
-                "AI가 파일 <b>내용</b>을 읽고 새 이름과 폴더를 제안합니다. 파일은 <b>확인을 누르기 전까지 옮기지 않습니다.</b>")
-        st.markdown(
-            '<div class="fs-kpis">'
-            f'<div class="fs-kpi hl"><small>흩어진 파일</small><b>{loose}</b></div>'
-            f'<div class="fs-kpi"><small>정리된 파일</small><b>{stats.get("organized_files", 0)}</b></div>'
-            f'<div class="fs-kpi"><small>미리 읽어 둔 파일</small><b>{watcher.get("ready", 0)}</b></div>'
-            '</div>', unsafe_allow_html=True)
-        left, right = st.columns([2, 3], gap="large")
-        with left:
-            with st.container(border=True, key="card-2"):
-                st.markdown('<div class="fs-sec">폴더 살펴보기</div>', unsafe_allow_html=True)
-                if watcher.get("running") and loose:
-                    ready, total = watcher.get("ready", 0), watcher.get("loose", 0)
-                    if total and ready >= total:
-                        note("폴더 감시 데몬이 새 파일을 <b>모두 미리 읽어 두었습니다.</b> 살펴보기가 바로 끝납니다.", "done")
-                    else:
-                        note(f"폴더 감시 데몬이 새 파일을 미리 읽는 중입니다 (<b>{ready}/{total}</b>). "
-                             "끝난 뒤에 누르면 기다리지 않습니다. 새로고침하면 진행 상황이 바뀝니다.", "acc")
-                st.write("Gemini가 문서·이미지 내용을 읽고 **이름 짓기 → 분류 → 폴더 제안**까지 한 번에 합니다. "
-                         "신분증·통장 같은 민감 파일은 AI에 보내지 않습니다.")
-                if st.button("폴더 살펴보기", type="primary", disabled=loose == 0, use_container_width=True):
-                    start_scan()
-                if loose == 0:
-                    st.caption("정리할 파일이 없습니다. 설정 탭의 '연습 폴더 초기화'로 샘플을 넣어 보세요.")
-        with right:
-            tree = api("GET", "/api/v1/tree", params={"depth": 1}) or {}
-            st.markdown(panel("정리 전", f"{loose}개", render_tree(tree_from_api(tree), "정리 폴더", max_files=12)),
-                        unsafe_allow_html=True)
+    elif not plan:  # ---- 1단계: 시작 화면 (실시간) ----
+        start_view()
 
     else:  # ---- 2단계: 미리보기 ----
         steps(2)
