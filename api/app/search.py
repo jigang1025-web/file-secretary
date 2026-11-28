@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import re
 import time
@@ -13,11 +15,12 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from . import analyzer
 from .config import settings
-from .db import FileRecord
+from .db import FileRecord, SearchCache
 
 log = logging.getLogger(__name__)
 
@@ -128,12 +131,48 @@ def _describe(rec: FileRecord) -> str:
             f"날짜: {rec.date} | 요약: {rec.summary} | 키워드: {kw}")
 
 
-def search(session: Session, query: str, limit: int = 8) -> tuple[str, list[Hit], str]:
-    """(한 줄 답, 결과 목록, source) — source: gemini | mock | fallback"""
+SEARCH_CACHE_VERSION = 1
+
+
+def cache_key(query: str, records: list[FileRecord]) -> str:
+    """질문 + 검색 대상 파일의 내용(제목·요약·키워드 등)으로 만든 키. 파일이 옮겨져도(위치만 바뀜) 그대로 쓰고,
+    내용이 바뀌거나 파일이 늘고 줄면 달라져서 다시 검색한다. 민감 파일은 AI에 보내지 않으므로 키에서 뺀다."""
+    h = hashlib.sha256()
+    h.update(f"v{SEARCH_CACHE_VERSION}|{' '.join(query.lower().split())}|".encode())
+    for r in sorted(records, key=lambda r: r.id):
+        if r.sensitive:
+            continue
+        h.update(json.dumps([r.id, r.title, r.category, r.course, r.date, r.summary, list(r.keywords or [])],
+                            ensure_ascii=False).encode())
+    return h.hexdigest()
+
+
+def is_cached(session: Session, query: str, records: list[FileRecord] | None = None) -> bool:
+    if records is None:
+        records = session.scalars(select(FileRecord)).all()
+    return session.get(SearchCache, cache_key(query, records)) is not None
+
+
+def _store_cache(session: Session, key: str, answer: str, picks: list[_Pick]) -> None:
+    if not settings.llm_cache:
+        return
+    payload = {"answer": answer, "picks": [{"id": p.id, "reason": p.reason} for p in picks]}
+    try:
+        session.merge(SearchCache(key=key, payload=payload))
+        session.commit()
+    except IntegrityError:  # 같은 질문을 동시에 저장하려 한 경우 — 먼저 저장된 것을 쓴다
+        session.rollback()
+
+
+def search(session: Session, query: str, limit: int = 8, timeout: float = 30) -> tuple[str, list[Hit], str]:
+    """(한 줄 답, 결과 목록, source) — source: gemini | mock | fallback
+    Gemini가 한 번 성공한 질문은 저장해 두었다가 같은 질문에는 호출 없이 바로 답한다 (source는 그대로 gemini).
+    timeout: Gemini를 기다리는 최대 시간(초). 화면에서는 30초, 미리 준비할 때는 더 길게."""
     records = session.scalars(select(FileRecord)).all()
     toks = tokens(query) or [query.strip().lower()]
     scored = sorted(((keyword_score(toks, r), r) for r in records), key=lambda x: -x[0])
     local = [(s, r) for s, r in scored if s > 0]
+    local_score = {r.id: s for s, r in local}
 
     def _mock(source: str) -> tuple[str, list[Hit], str]:
         hits = [Hit(r, s, f"제목·요약·키워드에 '{' '.join(toks)}'와 비슷한 단어가 있습니다.")
@@ -144,8 +183,31 @@ def search(session: Session, query: str, limit: int = 8) -> tuple[str, list[Hit]
             answer = f"'{query}'와 맞는 파일을 찾지 못했습니다. 다른 단어로 검색해 보세요."
         return answer, hits, source
 
+    def _assemble(answer: str, picks: list[_Pick], by_id: dict[int, FileRecord]) -> tuple[str, list[Hit], str]:
+        hits: list[Hit] = []
+        for pick in picks:
+            rec = by_id.get(pick.id)
+            if rec is not None and not rec.sensitive and all(h.record.id != rec.id for h in hits):
+                hits.append(Hit(rec, local_score.get(rec.id, 0.0), pick.reason.strip()))
+        # 민감 파일은 내 컴퓨터 점수로만 뒤에 붙인다
+        for s, r in local:
+            if r.sensitive and len(hits) < limit:
+                hits.append(Hit(r, s, "🔒 민감 파일 — AI에 보내지 않고 이름으로만 찾았습니다."))
+        return answer.strip(), hits[:limit], "gemini"
+
     if not settings.use_gemini:
         return _mock("mock")
+
+    key = cache_key(query, records)
+    if settings.llm_cache:
+        cached = session.get(SearchCache, key)
+        if cached is not None:
+            try:
+                picks = [_Pick(**p) for p in cached.payload.get("picks", [])]
+                log.info("검색 저장 결과 사용 (Gemini 호출 없음): %s", query)
+                return _assemble(str(cached.payload.get("answer", "")), picks, {r.id: r for r in records})
+            except Exception:  # noqa: BLE001 — 저장 형식이 이상하면 무시하고 새로 검색
+                log.warning("저장된 검색 결과를 읽지 못해 새로 검색합니다: %s", query)
 
     # Gemini에게는 민감하지 않은 파일만 후보로 보낸다
     candidates = [r for _, r in local if not r.sensitive][:20]
@@ -159,22 +221,12 @@ def search(session: Session, query: str, limit: int = 8) -> tuple[str, list[Hit]
     parts = [{"type": "text", "text": f"질문: {query}\n\n후보 파일 목록:\n" +
               "\n".join(_describe(r) for r in candidates)}]
     try:
-        deadline = time.monotonic() + 30  # 검색은 30초 안에
+        deadline = time.monotonic() + timeout
         text = analyzer.run_with_limit(
-            lambda: analyzer.call_with_retry(parts, SEARCH_PROMPT, SEARCH_SCHEMA, deadline=deadline), 35)
+            lambda: analyzer.call_with_retry(parts, SEARCH_PROMPT, SEARCH_SCHEMA, deadline=deadline), timeout + 5)
         parsed = _SearchAnswer.model_validate_json(text)
     except Exception as exc:  # noqa: BLE001
         log.warning("Gemini 검색 실패 → 단어 비교 결과로 대체: %s", exc)
         return _mock("fallback")
-    by_id = {r.id: r for r in candidates}
-    local_score = {r.id: s for s, r in local}
-    hits: list[Hit] = []
-    for pick in parsed.results:
-        rec = by_id.get(pick.id)
-        if rec is not None and all(h.record.id != rec.id for h in hits):
-            hits.append(Hit(rec, local_score.get(rec.id, 0.0), pick.reason.strip()))
-    # 민감 파일은 내 컴퓨터 점수로만 뒤에 붙인다
-    for s, r in local:
-        if r.sensitive and len(hits) < limit:
-            hits.append(Hit(r, s, "🔒 민감 파일 — AI에 보내지 않고 이름으로만 찾았습니다."))
-    return parsed.answer.strip(), hits[:limit], "gemini"
+    _store_cache(session, key, parsed.answer, parsed.results)
+    return _assemble(parsed.answer, parsed.results, {r.id: r for r in candidates})

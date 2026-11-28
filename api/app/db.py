@@ -145,6 +145,17 @@ class AnalysisCache(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class SearchCache(Base):
+    """'말로 검색'에서 Gemini가 한 번 답한 결과. 같은 질문을 다시 하면 호출 없이 바로 쓴다.
+    key = 질문(공백·대소문자 정리) + 검색 대상 파일들의 제목·요약·키워드 해시 (파일 내용이 바뀌면 다시 검색).
+    Gemini가 성공한 답만 저장한다 (실패하거나 규칙 기반으로 대체된 결과는 저장하지 않음)."""
+    __tablename__ = "search_cache"
+
+    key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)   # {"answer": str, "picks": [{"id": int, "reason": str}]}
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class WatcherStatus(Base):
     """폴더 감시 데몬(app/watcher.py)이 주기적으로 갱신하는 상태 1행."""
     __tablename__ = "watcher_status"

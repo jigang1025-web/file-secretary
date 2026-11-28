@@ -69,6 +69,10 @@ class Settings:
         # 폴더 감시 데몬(app/watcher.py): 확인 주기, 실패한 파일을 다시 시도하기까지의 시간(초)
         self.watch_interval_seconds = max(3, _int("WATCH_INTERVAL_SECONDS", 15))
         self.watch_retry_seconds = max(30, _int("WATCH_RETRY_SECONDS", 600))
+        # 감시 데몬이 파일을 모두 읽은 뒤, 자주 쓰는 검색 질문의 AI 답을 미리 받아 둔다 ('|'로 구분, 비우면 끔)
+        self.warm_queries = [q.strip() for q in os.getenv(
+            "SEARCH_WARMUP_QUERIES", "기말 프로젝트 공지|카페 와이파이 비밀번호|이번 달 영수증|자료구조 시험 범위").split("|") if q.strip()]
+        self.warm_timeout_seconds = float(os.getenv("SEARCH_WARMUP_TIMEOUT_SECONDS", "90"))
         self.extract_workers = max(1, _int("EXTRACT_WORKERS", 4))
 
     @property
