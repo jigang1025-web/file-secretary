@@ -23,7 +23,7 @@ from .config import settings
 log = logging.getLogger(__name__)
 
 # 프롬프트·결과 형식을 바꾸면 올려서 저장된 분석 결과(analysis_cache)를 새로 받게 한다
-CACHE_VERSION = 2  # 2: name_ok(원래 이름이 이미 알아보기 쉬운지) 추가
+CACHE_VERSION = 3  # 2: name_ok 추가, 3: 과목명을 AI가 스스로 짓기
 
 CATEGORIES = ["수업", "문서", "개인서류", "영수증·결제", "사진", "스크린샷", "영상·음성", "설치파일",
               "압축파일", "기타"]
@@ -95,15 +95,26 @@ def match_course(text: str, courses: dict[str, list[str]]) -> str:
     return best
 
 
-def normalize_course(value: str, courses: dict[str, list[str]]) -> str:
-    """Gemini가 돌려준 과목 이름을 사용자 목록의 정확한 이름으로 맞춘다 (없으면 빈 문자열)."""
+def clean_course(value: str) -> str:
+    """AI가 지은 과목명을 폴더 이름으로 쓸 수 있게 다듬는다."""
+    value = re.sub(r'[\\/:*?"<>|\r\n\t]', " ", value or "")
+    value = re.sub(r"\s+", " ", value).strip(" ._-")
+    return "" if value in ("수업", "강의", "기타", "과목") else value[:20]
+
+
+def normalize_course(value: str, courses: dict[str, list[str]], allow_new: bool = True) -> str:
+    """AI가 돌려준 과목명을 이미 있는 과목 폴더 이름에 맞춘다.
+    같은 과목이 없으면(allow_new) AI가 지은 이름을 그대로 새 과목으로 쓴다."""
     if not value:
         return ""
     v = _compact(value)
     for name, aliases in courses.items():
         if any(_compact(a) == v for a in aliases):
             return name
-    return match_course(value, courses)
+    for name, aliases in courses.items():  # '확률' ↔ '확률과통계' 처럼 한쪽이 다른 쪽을 포함하면 같은 과목
+        if any(len(_compact(a)) >= 2 and (_compact(a) in v or v in _compact(a)) for a in aliases):
+            return name
+    return clean_course(value) if allow_new else ""
 
 
 # ---------------------------------------------------------------------------
@@ -243,7 +254,7 @@ INSIGHT_SCHEMA = {
                     "index": {"type": "integer", "description": "The [파일 index=N] number"},
                     "category": {"type": "string", "enum": CATEGORIES},
                     "course": {"type": "string",
-                               "description": "Exactly one name from the user's course list, or empty string"},
+                               "description": "Course name: reuse the exact existing course folder name if it is the same course, otherwise a short official course name from the content; empty if not class material"},
                     "title": {"type": "string",
                               "description": "Korean title, 2-25 chars, no date, no course name, no \\/:*?\"<>|"},
                     "date": {"type": "string",
@@ -270,7 +281,9 @@ SYSTEM_PROMPT = """너는 대학생의 컴퓨터 파일을 정리해 주는 '파
    - 영수증·결제: 영수증, 주문·결제 내역, 거래명세서
    - 스크린샷: 화면을 캡처한 이미지, 사진: 카메라로 찍은 사진
    - 개인서류: 신분증·증명서 같은 개인 서류
-2. course는 사용자 과목 목록에 있는 이름을 그대로 쓰고, 해당 과목이 없으면 빈 문자열로 둔다.
+2. course는 수업 자료의 과목명이다. '기존 과목 폴더'에 같은 과목이 있으면 그 이름을 글자 그대로 쓰고,
+   없으면 내용에 나온 정식 과목명을 짧게 쓴다 (예: '확률과통계', '한국근현대사', '파이썬프로그래밍').
+   수업 자료가 아니거나 과목을 알 수 없으면 빈 문자열로 둔다.
 3. title은 내용을 대표하는 한국어 제목 2~25자. 날짜와 과목명은 넣지 말고,
    파일 이름에 쓸 수 없는 문자(\\ / : * ? " < > |)도 쓰지 않는다. 예: '기말 프로젝트 안내', '카페 영수증'
 4. date는 내용에 적힌 대표 날짜(작성일·공지일·발행일)를 YYYY-MM-DD로. 없거나 확실하지 않으면 빈 문자열. 지어내지 않는다.
@@ -296,7 +309,7 @@ def build_parts(batch: list[AnalysisInput], course_names: list[str]) -> list[dic
     parts: list[dict] = [{
         "type": "text",
         "text": (f"오늘 날짜: {date.today().isoformat()}\n"
-                 f"사용자 과목 목록: {', '.join(course_names) if course_names else '(없음)'}\n"
+                 f"기존 과목 폴더: {', '.join(course_names) if course_names else '(아직 없음)'}\n"
                  f"아래 {len(batch)}개 파일을 분석하세요."),
     }]
     for inp in batch:

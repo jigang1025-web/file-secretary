@@ -115,6 +115,19 @@ def unique_name(dest_abs: Path, name: str, taken: set[str]) -> str:
     return candidate
 
 
+def course_folders(root: Path) -> list[str]:
+    """정리 폴더의 '수업' 아래에 이미 있는 과목 폴더 이름 (사용자가 만든 정리 방식을 따른다)."""
+    base = root / "수업"
+    if not base.is_dir():
+        return []
+    return sorted(p.name for p in base.iterdir() if p.is_dir() and not p.name.startswith(".") and p.name != "기타")
+
+
+def known_courses(root: Path, cfg) -> list[str]:
+    """AI에게 알려 줄 과목: 이미 있는 과목 폴더 + 예전에 저장된 과목 목록(있으면)."""
+    return list(dict.fromkeys([*course_folders(root), *(cfg.courses or [])]))
+
+
 def dest_dir_for(category: str, course: str) -> str:
     if category == "수업":
         return f"수업/{sanitize_component(course, 40) or '기타'}"
@@ -250,10 +263,11 @@ def _store_cache(session, key: str, ins: analyzer.Insight) -> None:
         session.rollback()
 
 
-def _analyze_with_cache(session, inputs, works, cfg, want_image) -> dict:
+def _analyze_with_cache(session, inputs, works, cfg, want_image, courses: list[str] | None = None) -> dict:
     """저장된 Gemini 결과가 있는 파일은 그대로 쓰고, 처음 보는 파일만 Gemini에 보낸다."""
+    courses = (cfg.courses or []) if courses is None else courses
     if not (settings.use_gemini and settings.llm_cache) or not inputs:
-        return analyzer.analyze(inputs, cfg.courses or [])
+        return analyzer.analyze(inputs, courses)
     keys = {inp.index: _cache_key(works[inp.index].sha, cfg, want_image) for inp in inputs}
     rows = {r.key: r for r in session.scalars(select(AnalysisCache).where(AnalysisCache.key.in_(keys.values())))}
     session.commit()  # AI를 기다리는 동안 DB 트랜잭션을 열어 두지 않는다
@@ -266,7 +280,7 @@ def _analyze_with_cache(session, inputs, works, cfg, want_image) -> dict:
         else:
             misses.append(inp)
     if misses:
-        fresh = analyzer.analyze(misses, cfg.courses or [])
+        fresh = analyzer.analyze(misses, courses)
         insights.update(fresh)
         for inp in misses:
             ins = fresh.get(inp.index)
@@ -356,7 +370,8 @@ def prefetch(session: Session, root: Path, cfg: AppSettings, paths: list[Path]) 
     session.commit()
     todo = [w for w in works if not w.duplicate_of and keys[w.rel] not in have]
     _extract_all(todo, cfg, want_image)
-    insights = _analyze_with_cache(session, _make_inputs(works, want_image), works, cfg, want_image)
+    insights = _analyze_with_cache(session, _make_inputs(works, want_image), works, cfg, want_image,
+                                   known_courses(root, cfg))
     outcome: dict[str, str] = {}
     for i, w in enumerate(works):
         if w.duplicate_of or w.sensitive:
@@ -375,7 +390,9 @@ def build_plan(session: Session, root: Path, cfg: AppSettings, limit: int | None
     want_image = settings.use_gemini and cfg.analyze_images
     _extract_all([w for w in works if not w.duplicate_of], cfg, want_image)
     inputs = _make_inputs(works, want_image)
-    insights = _analyze_with_cache(session, inputs, works, cfg, want_image)
+    known = known_courses(root, cfg)
+    insights = _analyze_with_cache(session, inputs, works, cfg, want_image, known)
+    course_map = analyzer.parse_courses(known)
 
     # ⑤ 새 이름·폴더
     plan = Plan(status="draft", total=len(works))
@@ -396,6 +413,8 @@ def build_plan(session: Session, root: Path, cfg: AppSettings, limit: int | None
                     sensitive_title(w.path.name, local_text, cfg.extra_sensitive_keywords))
             else:
                 ins = insights.get(i) or analyzer.Insight(category="기타", title=w.path.stem)
+                # 저장해 둔 결과의 과목명도 지금 있는 과목 폴더 이름에 맞춘다 (같은 과목이 폴더 두 개로 갈라지지 않게)
+                ins.course = analyzer.normalize_course(ins.course, course_map) if ins.category == "수업" else ""
             text_for_date = "" if (w.sensitive or w.ext in SPREADSHEET_EXT) else (ex.text if ex else "")
             day = (ins.date or date_from_text(text_for_date) or date_from_name(w.path.name)
                    or (ex.exif_date if ex else "") or mtime_date(w.mtime))
