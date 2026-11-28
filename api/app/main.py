@@ -80,8 +80,9 @@ def _settings_out(session: Session) -> SettingsOut:
     cfg = get_app_settings(session)
     root = settings.target_dir.resolve()
     return SettingsOut(
-        courses=cfg.courses or [], name_pattern=cfg.name_pattern, analyze_images=cfg.analyze_images,
-        extra_sensitive_keywords=cfg.extra_sensitive_keywords or [], target_dir=str(root),
+        courses=cfg.courses or [], name_pattern=planner.normalize_pattern(cfg.name_pattern), analyze_images=cfg.analyze_images,
+        extra_sensitive_keywords=cfg.extra_sensitive_keywords or [],
+        keep_good_names=cfg.keep_good_names if cfg.keep_good_names is not None else True, target_dir=str(root),
         llm_mode=settings.effective_llm_mode, gemini_model=settings.gemini_model,
         ocr_enabled=settings.ocr_enabled,
         demo_reset_available=(settings.samples_dir / "manifest.json").exists()
@@ -101,6 +102,7 @@ def replace_settings(body: SettingsIn, session: Session = Depends(get_session)):
     cfg.name_pattern = body.name_pattern
     cfg.analyze_images = body.analyze_images
     cfg.extra_sensitive_keywords = [k.strip() for k in body.extra_sensitive_keywords if k.strip()]
+    cfg.keep_good_names = body.keep_good_names
     session.commit()
     return _settings_out(session)
 

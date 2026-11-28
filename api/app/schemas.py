@@ -6,15 +6,16 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-NamePattern = Literal["date_course_title", "course_title_date", "title_date", "title_only"]
+NamePattern = Literal["date_title", "title_date", "title_only"]
 
 
 class SettingsIn(BaseModel):
     courses: list[str] = Field(default_factory=list, max_length=50,
                                description="내 과목 목록. '기계학습: 머신러닝, ML'처럼 별칭을 쓸 수 있음")
-    name_pattern: NamePattern = "date_course_title"
+    name_pattern: NamePattern = "date_title"
     analyze_images: bool = Field(True, description="이미지 내용을 AI로 분석할지 (끄면 이름·내 컴퓨터 OCR로만 분류)")
     extra_sensitive_keywords: list[str] = Field(default_factory=list, max_length=100)
+    keep_good_names: bool = Field(True, description="원래 이름만 봐도 알 수 있는 파일은 이름을 바꾸지 않고 폴더만 옮김")
 
 
 class SettingsOut(SettingsIn):

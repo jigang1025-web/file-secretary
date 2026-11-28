@@ -16,7 +16,9 @@ def test_parse_and_match_courses():
     assert courses["기계학습"] == ["기계학습", "머신러닝", "ML"]
     assert analyzer.match_course("머신러닝 과제 안내", courses) == "기계학습"
     assert analyzer.normalize_course("자료 구조", courses) == "자료구조"
-    assert analyzer.normalize_course("없는 과목", courses) == ""
+    assert analyzer.normalize_course("없는 과목", courses, allow_new=False) == ""
+    assert analyzer.normalize_course("한국근현대사", courses) == "한국근현대사"  # 처음 보는 과목은 AI가 지은 이름 그대로
+    assert analyzer.normalize_course("확률", analyzer.parse_courses(["확률과통계"])) == "확률과통계"  # 이미 있는 폴더로
 
 
 def test_gemini_request_format_and_privacy(session, demo_target, fake_gemini):
@@ -181,3 +183,33 @@ def test_hard_limit_when_call_hangs(session, app_env, fake_gemini, monkeypatch):
     plan = planner.build_plan(session, app_env, get_app_settings(session))
     assert _time.monotonic() - started < 15
     assert plan.items[0].source == "fallback"
+
+
+def test_ai_names_new_course_and_reuses_existing_folder(session, app_env, fake_gemini):
+    from app import planner
+    from app.db import get_app_settings
+
+    (app_env / "수업" / "한국근현대사").mkdir(parents=True)  # 사용자가 이미 만든 과목 폴더
+    (app_env / "연표.txt").write_text("갑오개혁 연표 과제", encoding="utf-8")
+    (app_env / "확률과제.txt").write_text("조건부확률 과제", encoding="utf-8")
+    names = {}
+
+    def responder(indexes, body):
+        text = fake_gemini.texts(body)
+        names["prompt"] = text
+        out = []
+        for i in indexes:
+            course = "한국 근현대사" if "연표" in text.split(f"[파일 index={i}]")[1][:60] else "확률론"
+            out.append({"index": i, "category": "수업", "course": course, "title": f"제목 {i}", "date": "",
+                        "summary": "요약", "keywords": [], "name_ok": False})
+        return {"files": out}
+
+    fake_gemini.file_responder = responder
+    cfg = get_app_settings(session)
+    cfg.courses = []
+    session.commit()
+    plan = planner.build_plan(session, app_env, cfg)
+    dest = {i.src_rel: i.dest_dir for i in plan.items}
+    assert dest["연표.txt"] == "수업/한국근현대사"        # '한국 근현대사' → 이미 있는 폴더 이름으로 맞춤
+    assert dest["확률과제.txt"] == "수업/확률론"          # 처음 보는 과목은 AI가 지은 이름으로 새 폴더
+    assert "기존 과목 폴더: 한국근현대사" in names["prompt"]

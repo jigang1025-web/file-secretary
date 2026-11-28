@@ -40,9 +40,10 @@ class AppSettings(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     courses: Mapped[list] = mapped_column(JSON, default=list)
-    name_pattern: Mapped[str] = mapped_column(String(32), default="date_course_title")
+    name_pattern: Mapped[str] = mapped_column(String(32), default="date_title")
     analyze_images: Mapped[bool] = mapped_column(Boolean, default=True)
     extra_sensitive_keywords: Mapped[list] = mapped_column(JSON, default=list)
+    keep_good_names: Mapped[bool] = mapped_column(Boolean, default=True)  # 이미 알아보기 쉬운 이름은 그대로
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
@@ -185,6 +186,21 @@ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 def init_db() -> None:
     Base.metadata.create_all(engine)
+    _add_missing_columns()
+
+
+def _add_missing_columns() -> None:
+    """예전 버전으로 만든 DB(PostgreSQL 볼륨)에 새 열을 추가한다. create_all은 이미 있는 표를 바꾸지 않기 때문."""
+    from sqlalchemy import inspect, text
+
+    added = {"app_settings": {"keep_good_names": "BOOLEAN DEFAULT TRUE"}}
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for table, cols in added.items():
+            have = {c["name"] for c in insp.get_columns(table)}
+            for name, ddl in cols.items():
+                if name not in have:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
 
 
 def get_session() -> Iterator[Session]:
@@ -195,8 +211,8 @@ def get_session() -> Iterator[Session]:
 def get_app_settings(session: Session) -> AppSettings:
     row = session.get(AppSettings, 1)
     if row is None:
-        row = AppSettings(id=1, courses=list(DEFAULT_COURSES), name_pattern="date_course_title",
-                          analyze_images=True, extra_sensitive_keywords=[])
+        row = AppSettings(id=1, courses=list(DEFAULT_COURSES), name_pattern="date_title",
+                          analyze_images=True, extra_sensitive_keywords=[], keep_good_names=True)
         session.add(row)
         session.commit()
     return row

@@ -37,12 +37,17 @@ SKIP_NAMES = {"desktop.ini", "thumbs.db", ".ds_store", MARKER}
 PARTIAL_EXT = {".crdownload", ".part", ".partial", ".download", ".tmp", ".opdownload"}
 DUPLICATE_DIR = "중복 파일"
 
-NAME_PATTERNS = {
-    "date_course_title": ["date", "course", "title"],
-    "course_title_date": ["course", "title", "date"],
+NAME_PATTERNS = {             # 새 이름 규칙: 날짜와 제목만 쓴다 (과목은 폴더 이름으로 충분)
+    "date_title": ["date", "title"],
     "title_date": ["title", "date"],
     "title_only": ["title"],
 }
+LEGACY_PATTERNS = {"date_course_title": "date_title", "course_title_date": "title_date"}  # 예전 설정값
+
+
+def normalize_pattern(pattern: str | None) -> str:
+    pattern = LEGACY_PATTERNS.get(pattern or "", pattern or "")
+    return pattern if pattern in NAME_PATTERNS else "date_title"
 
 WINDOWS_RESERVED = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)),
                     *(f"lpt{i}" for i in range(1, 10))}
@@ -91,7 +96,7 @@ def strip_course(title: str, course: str) -> str:
 def build_name(pattern: str, date_str: str, course: str, title: str, ext: str) -> str:
     title = sanitize_component(strip_course(title, course), 60) or "파일"
     values = {"date": date_str, "course": sanitize_component(course, 30), "title": title}
-    segments = [values[k] for k in NAME_PATTERNS.get(pattern, NAME_PATTERNS["date_course_title"]) if values[k]]
+    segments = [values[k] for k in NAME_PATTERNS[normalize_pattern(pattern)] if values[k]]
     stem = "_".join(segments)[:120].strip(" ._")
     return f"{stem}{ext.lower()}"
 
@@ -108,6 +113,19 @@ def unique_name(dest_abs: Path, name: str, taken: set[str]) -> str:
         n += 1
     taken.add(f"{dest_abs}/{candidate}".lower())
     return candidate
+
+
+def course_folders(root: Path) -> list[str]:
+    """정리 폴더의 '수업' 아래에 이미 있는 과목 폴더 이름 (사용자가 만든 정리 방식을 따른다)."""
+    base = root / "수업"
+    if not base.is_dir():
+        return []
+    return sorted(p.name for p in base.iterdir() if p.is_dir() and not p.name.startswith(".") and p.name != "기타")
+
+
+def known_courses(root: Path, cfg) -> list[str]:
+    """AI에게 알려 줄 과목: 이미 있는 과목 폴더 + 예전에 저장된 과목 목록(있으면)."""
+    return list(dict.fromkeys([*course_folders(root), *(cfg.courses or [])]))
 
 
 def dest_dir_for(category: str, course: str) -> str:
@@ -245,10 +263,11 @@ def _store_cache(session, key: str, ins: analyzer.Insight) -> None:
         session.rollback()
 
 
-def _analyze_with_cache(session, inputs, works, cfg, want_image) -> dict:
+def _analyze_with_cache(session, inputs, works, cfg, want_image, courses: list[str] | None = None) -> dict:
     """저장된 Gemini 결과가 있는 파일은 그대로 쓰고, 처음 보는 파일만 Gemini에 보낸다."""
+    courses = (cfg.courses or []) if courses is None else courses
     if not (settings.use_gemini and settings.llm_cache) or not inputs:
-        return analyzer.analyze(inputs, cfg.courses or [])
+        return analyzer.analyze(inputs, courses)
     keys = {inp.index: _cache_key(works[inp.index].sha, cfg, want_image) for inp in inputs}
     rows = {r.key: r for r in session.scalars(select(AnalysisCache).where(AnalysisCache.key.in_(keys.values())))}
     session.commit()  # AI를 기다리는 동안 DB 트랜잭션을 열어 두지 않는다
@@ -261,7 +280,7 @@ def _analyze_with_cache(session, inputs, works, cfg, want_image) -> dict:
         else:
             misses.append(inp)
     if misses:
-        fresh = analyzer.analyze(misses, cfg.courses or [])
+        fresh = analyzer.analyze(misses, courses)
         insights.update(fresh)
         for inp in misses:
             ins = fresh.get(inp.index)
@@ -351,7 +370,8 @@ def prefetch(session: Session, root: Path, cfg: AppSettings, paths: list[Path]) 
     session.commit()
     todo = [w for w in works if not w.duplicate_of and keys[w.rel] not in have]
     _extract_all(todo, cfg, want_image)
-    insights = _analyze_with_cache(session, _make_inputs(works, want_image), works, cfg, want_image)
+    insights = _analyze_with_cache(session, _make_inputs(works, want_image), works, cfg, want_image,
+                                   known_courses(root, cfg))
     outcome: dict[str, str] = {}
     for i, w in enumerate(works):
         if w.duplicate_of or w.sensitive:
@@ -370,7 +390,9 @@ def build_plan(session: Session, root: Path, cfg: AppSettings, limit: int | None
     want_image = settings.use_gemini and cfg.analyze_images
     _extract_all([w for w in works if not w.duplicate_of], cfg, want_image)
     inputs = _make_inputs(works, want_image)
-    insights = _analyze_with_cache(session, inputs, works, cfg, want_image)
+    known = known_courses(root, cfg)
+    insights = _analyze_with_cache(session, inputs, works, cfg, want_image, known)
+    course_map = analyzer.parse_courses(known)
 
     # ⑤ 새 이름·폴더
     plan = Plan(status="draft", total=len(works))
@@ -391,6 +413,8 @@ def build_plan(session: Session, root: Path, cfg: AppSettings, limit: int | None
                     sensitive_title(w.path.name, local_text, cfg.extra_sensitive_keywords))
             else:
                 ins = insights.get(i) or analyzer.Insight(category="기타", title=w.path.stem)
+                # 저장해 둔 결과의 과목명도 지금 있는 과목 폴더 이름에 맞춘다 (같은 과목이 폴더 두 개로 갈라지지 않게)
+                ins.course = analyzer.normalize_course(ins.course, course_map) if ins.category == "수업" else ""
             text_for_date = "" if (w.sensitive or w.ext in SPREADSHEET_EXT) else (ex.text if ex else "")
             day = (ins.date or date_from_text(text_for_date) or date_from_name(w.path.name)
                    or (ex.exif_date if ex else "") or mtime_date(w.mtime))
@@ -398,6 +422,9 @@ def build_plan(session: Session, root: Path, cfg: AppSettings, limit: int | None
             dest = dest_dir_for(ins.category, ins.course)
             if keep_original_name(w.kind, ins.source):
                 new_name = w.path.name
+            elif cfg.keep_good_names is not False and ins.name_ok and not w.sensitive:
+                new_name = w.path.name
+                w.flags = [*w.flags, "이름이 이미 알아보기 쉬워 그대로 둠"]
             else:
                 new_name = build_name(cfg.name_pattern, day, ins.course, ins.title, w.ext)
         new_name = unique_name(safe_join(root, dest), new_name, taken)

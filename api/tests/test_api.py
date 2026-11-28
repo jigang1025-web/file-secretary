@@ -105,3 +105,29 @@ def test_open_file_with_signed_link(client, app_env):
     old = int(time.time()) - 10
     expired = bare.get(f"/api/v1/files/{rec['id']}/open", params={"exp": old, "sig": file_link_signature(rec["id"], old)})
     assert expired.status_code == 403
+
+
+def test_settings_keep_good_names_roundtrip(client):
+    got = client.get("/api/v1/settings").json()
+    assert got["keep_good_names"] is True
+    body = {k: got[k] for k in ("courses", "name_pattern", "analyze_images", "extra_sensitive_keywords")}
+    off = client.put("/api/v1/settings", json={**body, "keep_good_names": False}).json()
+    assert off["keep_good_names"] is False
+
+
+def test_init_db_adds_missing_column(tmp_path, monkeypatch):
+    from sqlalchemy import create_engine, inspect, text
+
+    from app import db
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'old.db'}")
+    with engine.begin() as conn:  # 예전 버전의 표 (keep_good_names 열 없음)
+        conn.execute(text("CREATE TABLE app_settings (id INTEGER PRIMARY KEY, courses JSON, name_pattern VARCHAR(32), "
+                          "analyze_images BOOLEAN, extra_sensitive_keywords JSON, updated_at DATETIME)"))
+        conn.execute(text("INSERT INTO app_settings (id, courses, name_pattern, analyze_images, extra_sensitive_keywords) "
+                          "VALUES (1, '[]', 'date_course_title', 1, '[]')"))
+    monkeypatch.setattr(db, "engine", engine)
+    db.init_db()
+    assert "keep_good_names" in {c["name"] for c in inspect(engine).get_columns("app_settings")}
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT keep_good_names FROM app_settings WHERE id = 1")).scalar() in (1, True)

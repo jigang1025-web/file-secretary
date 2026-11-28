@@ -14,12 +14,12 @@ def test_sanitize_and_reserved_names():
 
 
 def test_build_name_patterns_and_course_strip():
-    name = planner.build_name("date_course_title", "2026-11-09", "오픈소스프로그래밍",
+    name = planner.build_name("date_title", "2026-11-09", "오픈소스프로그래밍",
                               "오픈소스 프로그래밍 기말 프로젝트 안내", ".PDF")
-    assert name == "2026-11-09_오픈소스프로그래밍_기말 프로젝트 안내.pdf"
+    assert name == "2026-11-09_기말 프로젝트 안내.pdf"
+    assert planner.build_name("date_course_title", "2026-11-09", "", "공지", ".pdf") == "2026-11-09_공지.pdf"  # 예전 설정값
     assert planner.build_name("title_only", "2026-11-09", "", "카페 영수증", ".jpg") == "카페 영수증.jpg"
-    assert planner.build_name("course_title_date", "2026-11-09", "기계학습", "과제 2", ".pdf") == \
-        "기계학습_과제 2_2026-11-09.pdf"
+    assert planner.build_name("title_date", "2026-11-09", "기계학습", "과제 2", ".pdf") == "과제 2_2026-11-09.pdf"
 
 
 def test_unique_name(tmp_path):
@@ -58,7 +58,7 @@ def test_build_plan_on_demo_folder(session, demo_target):
 
     notice = items["다운로드 (7).pdf"]
     assert notice.dest_dir == "수업/오픈소스프로그래밍"
-    assert notice.new_name == "2026-11-09_오픈소스프로그래밍_기말 프로젝트 안내.pdf"
+    assert notice.new_name == "2026-11-09_기말 프로젝트 안내.pdf"
 
     dup = items["다운로드 (1).pdf"]
     assert dup.dest_dir == "중복 파일" and "중복" in dup.flags[0]
@@ -84,7 +84,7 @@ def test_plan_detects_already_organized_twin(session, demo_target):
     mover.apply_plan(session, plan, demo_target)
     again = demo_target / "다시 받은 공지.pdf"
     again.write_bytes((demo_target / "수업" / "오픈소스프로그래밍" /
-                       "2026-11-09_오픈소스프로그래밍_기말 프로젝트 안내.pdf").read_bytes())
+                       "2026-11-09_기말 프로젝트 안내.pdf").read_bytes())
     plan2 = planner.build_plan(session, demo_target, get_app_settings(session))
     item = plan2.items[0]
     assert item.dest_dir == "중복 파일" and "이미 정리된" in item.flags[0]
@@ -97,3 +97,34 @@ def test_mtime_used_when_no_other_date(session, app_env):
     os.utime(p, (t, t))
     plan = planner.build_plan(session, app_env, get_app_settings(session))
     assert plan.items[0].new_name.startswith("2026-03-02_")
+
+
+def test_name_is_meaningful():
+    from app.analyzer import name_is_meaningful
+
+    assert name_is_meaningful("한국근현대사 연표 양식.hwp")
+    assert name_is_meaningful("1 2026학년도 2학기 부·복수전공 신청 안내.pdf")
+    assert not name_is_meaningful("KakaoTalk_20261103_153201234.jpg")
+    assert not name_is_meaningful("다운로드 (7).pdf")
+    assert not name_is_meaningful("강의자료_week10.pdf")
+    assert not name_is_meaningful("final_진짜최종(2).docx")
+
+
+def test_keep_good_names_setting(session, app_env):
+    good = app_env / "한국근현대사 연표 양식.txt"
+    good.write_text("한국 근현대사 주요 사건 연표를 정리하는 양식입니다.", encoding="utf-8")
+    vague = app_env / "새 텍스트 문서.txt"
+    vague.write_text("스터디카페 와이파이 비밀번호 메모", encoding="utf-8")
+    cfg = get_app_settings(session)
+
+    plan = planner.build_plan(session, app_env, cfg)
+    items = {i.src_rel: i for i in plan.items}
+    assert items[good.name].new_name == good.name
+    assert "그대로 둠" in " ".join(items[good.name].flags)
+    assert items[vague.name].new_name != vague.name
+
+    cfg.keep_good_names = False
+    session.commit()
+    plan = planner.build_plan(session, app_env, cfg)
+    items = {i.src_rel: i for i in plan.items}
+    assert items[good.name].new_name != good.name
